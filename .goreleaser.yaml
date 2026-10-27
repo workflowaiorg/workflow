@@ -1,0 +1,31 @@
+# Builds a release when a vX.Y.Z tag is pushed: binaries for macOS and Linux on amd64 and arm64,
+# and a checksums.txt every download can be verified against.
+version: 2
+
+project_name: wf
+
+builds:
+  - main: ./cmd/wf
+    binary: wf
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  use: github
+
+# A tag with a suffix (v0.1.0-rc.1) is published as a pre-release, never as the latest release.
+release:
+  prerelease: auto
