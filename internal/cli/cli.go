@@ -4,11 +4,14 @@ package cli
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"slices"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/workflowaiorg/workflow/internal/render"
 )
 
 // Exit codes. Usage errors are told apart from failures, so a script can tell a typo from a fault.
@@ -21,6 +24,9 @@ const (
 // errUsage marks an error that is the caller's mistake, not wf's.
 var errUsage = errors.New("usage")
 
+// errHelpShown ends a command whose -h has printed its usage.
+var errHelpShown = errors.New("help shown")
+
 // Command is one wf command.
 type Command struct {
 	Name    string `json:"name"`
@@ -29,18 +35,23 @@ type Command struct {
 	run     func(app *App, args []string) error
 }
 
-// App holds what every command needs: the version wf reports and where it writes.
+// App holds what every command needs: the version wf reports, the project it works on, and where
+// it writes.
 type App struct {
 	version  string
+	dir      string
 	stdout   io.Writer
 	stderr   io.Writer
 	commands []Command
 }
 
-// New returns wf's command line, reporting version and writing to stdout and stderr.
-func New(version string, stdout, stderr io.Writer) *App {
-	app := &App{version: version, stdout: stdout, stderr: stderr}
+// New returns wf's command line, reporting version, working on the project at dir, and writing to
+// stdout and stderr.
+func New(version, dir string, stdout, stderr io.Writer) *App {
+	app := &App{version: version, dir: dir, stdout: stdout, stderr: stderr}
 	app.commands = []Command{
+		{Name: "sync", Usage: "wf sync [--check | --force]", Summary: "Write every assistant's files from .agents; --check only compares", run: runSync},
+		{Name: "show", Usage: "wf show <skill> [--base]", Summary: "Print a skill as an assistant reads it; --base for wf's part alone", run: runShow},
 		{Name: "version", Usage: "wf version", Summary: "Print wf's version", run: runVersion},
 		{Name: "help", Usage: "wf help [--json]", Summary: "List wf's commands; --json for agents", run: runHelp},
 	}
@@ -64,13 +75,33 @@ func (app *App) Run(args []string) int {
 	}
 
 	if err := app.commands[index].run(app, rest); err != nil {
+		if errors.Is(err, errHelpShown) {
+			return exitOK
+		}
 		fmt.Fprintf(app.stderr, "wf %s: %v\n", name, err)
-		if errors.Is(err, errUsage) {
+		var notFound *render.NotFoundError
+		if errors.Is(err, errUsage) || errors.As(err, &notFound) {
 			return exitUsage
 		}
 		return exitFailure
 	}
 	return exitOK
+}
+
+// parseFlags parses args into flags, and any mistake in them is a usage error. -h prints the
+// command's usage line and ends it.
+func (app *App) parseFlags(flags *flag.FlagSet, args []string) error {
+	flags.SetOutput(io.Discard)
+	err := flags.Parse(args)
+	if errors.Is(err, flag.ErrHelp) {
+		index := slices.IndexFunc(app.commands, func(command Command) bool { return command.Name == flags.Name() })
+		fmt.Fprintf(app.stdout, "usage: %s\n%s\n", app.commands[index].Usage, app.commands[index].Summary)
+		return errHelpShown
+	}
+	if err != nil {
+		return fmt.Errorf("%w: %v", errUsage, err)
+	}
+	return nil
 }
 
 func runVersion(app *App, args []string) error {
