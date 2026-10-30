@@ -14,6 +14,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/workflowaiorg/workflow/internal/component"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -54,8 +55,8 @@ type plan struct {
 // Sync writes every generated file of the project at dir and its .wf.lock, and removes the files
 // an earlier sync generated that it no longer does. It never writes .agents/project. A file at a
 // generated path that wf did not write is skipped unless force is set.
-func Sync(dir string, config project.Config, version string, force bool) (Report, error) {
-	p, err := newPlan(dir, config, version, force)
+func Sync(dir string, config project.Config, components []component.Component, version string, force bool) (Report, error) {
+	p, err := newPlan(dir, config, components, version, force)
 	if err != nil {
 		return Report{}, err
 	}
@@ -99,8 +100,8 @@ func Sync(dir string, config project.Config, version string, force bool) (Report
 
 // Check compares the project at dir with what Sync would write, and writes nothing. It returns one
 // line per file that differs, naming it; none means the project is in sync.
-func Check(dir string, config project.Config, version string) ([]string, error) {
-	p, err := newPlan(dir, config, version, false)
+func Check(dir string, config project.Config, components []component.Component, version string) ([]string, error) {
+	p, err := newPlan(dir, config, components, version, false)
 	if err != nil {
 		return nil, err
 	}
@@ -135,8 +136,8 @@ func Check(dir string, config project.Config, version string) ([]string, error) 
 	return differences, nil
 }
 
-func newPlan(dir string, config project.Config, version string, force bool) (plan, error) {
-	files, err := Render(dir, config, version)
+func newPlan(dir string, config project.Config, components []component.Component, version string, force bool) (plan, error) {
+	files, err := Render(dir, config, components, version)
 	if err != nil {
 		return plan{}, err
 	}

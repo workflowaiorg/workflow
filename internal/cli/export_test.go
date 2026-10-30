@@ -3,6 +3,8 @@ package cli
 import (
 	"bytes"
 	"time"
+
+	"github.com/workflowaiorg/workflow/internal/component"
 )
 
 // ModuleVersion exposes moduleVersion to the external tests.
@@ -18,3 +20,6 @@ func (app *App) SetNow(now time.Time) { app.now = func() time.Time { return now 
 func (app *App) Output() (stdout, stderr *bytes.Buffer) {
 	return app.stdout.(*bytes.Buffer), app.stderr.(*bytes.Buffer)
 }
+
+// SetComponents makes components the ones wf add offers.
+func (app *App) SetComponents(components ...component.Component) { app.components = components }

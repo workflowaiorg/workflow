@@ -49,6 +49,8 @@ developer's own request starts with `Hotfix:`.
 | Command | What it does |
 |---|---|
 | `wf init [--forge <forge>]` | start using wf: `.wf.yml`, `.agents/base`, and every assistant's files |
+| `wf add [<component>]` | list the components wf carries, or add one: its part of `.agents/base`, its files, its answers in `.wf.yml`; `-h` after its name lists its options |
+| `wf <component> <command>` | run a command of an installed component; `wf <component> -h` lists them |
 | `wf sync` | write every assistant's files from `.agents/base` and `.agents/project` |
 | `wf sync --check` | write nothing; fail, naming the file, when a generated file or `.agents/base` differs from what this version of wf writes |
 | `wf show <skill> [--base]` | print a skill as an assistant reads it, or wf's part alone |
@@ -71,7 +73,7 @@ Written by `wf sync` for every assistant from `.agents/`: `.claude/commands/`,
 ### Where everything lives
 
 ```
-.wf.yml                            the project's choices: wf's version, the forge, worktree copies, gate steps
+.wf.yml                            the project's choices: wf's version, the forge, worktree copies, gate steps, components
 .wf.lock                           what wf sync last wrote, with a hash of each file; never edited
 .agents/base/                      wf's part of every instruction, skill, command and subagent; never edited
 .agents/project/                   the project's part, in the same layout; wins where the two disagree

@@ -22,6 +22,7 @@ What a project gets from it:
 - [Start in a project](#start-in-a-project)
 - [A day with wf](#a-day-with-wf)
 - [Your rules and wf's rules](#your-rules-and-wfs-rules)
+- [Components](#components)
 - [Settings: .wf.yml](#settings-wfyml)
 - [Commands](#commands)
 - [Where everything lives](#where-everything-lives)
@@ -174,6 +175,32 @@ they point to, in `.agents/project/skills/domain-specs/SKILL.md`.
 `wf sync` overwrites your edit, and `wf sync --check` fails on it. Put the change in
 `.agents/project/` instead.
 
+## Components
+
+A component adds one capability to the project, such as a backend or a frontend. It brings its own
+skills, commands and sections of `AGENTS.md` and the guide; its own steps in `/pre-mr-check`'s gate;
+and its own wf commands, which start with its name: `wf <component> <command>`.
+
+```sh
+wf add                    # list the components wf carries
+wf add <component>        # add one; wf asks what it needs to know
+```
+
+Every question is also a flag, so a script or an agent passes the answer instead of being asked.
+`wf add` then:
+
+1. puts the component's part of the base into `.agents/base`;
+2. writes the files it gives a project once (yours from then on, like the decisions index);
+3. records the component and your answers under `components:` in `.wf.yml`. Your settings and
+   comments stay; blank lines between keys and your own indentation are tidied away;
+4. runs `wf sync`.
+
+When the component needs a change in a file your project owns, such as `.gitignore`, wf prints it on
+a `by hand` line and leaves the change to you. Commit what `wf add` wrote, as after `wf init`.
+
+wf carries no components yet; the backend and frontend come next. `wf add` lists what your version
+has.
+
 ## Settings: .wf.yml
 
 ```yaml
@@ -194,6 +221,11 @@ gate:
   - name: tests
     paths: ["**/*.go", "go.mod"]
     run: go test ./...
+
+# The components wf add installed, with the answers given. wf add writes this.
+components:
+  backend:
+    grpc: true
 ```
 
 - `wf` and `forge` are required. `wf sync`, `wf show` and `wf worktree` check every setting first,
@@ -202,7 +234,8 @@ gate:
   worktree, and copying an untracked one would make the worktree look changed.
 - `gate:` is optional. wf's two checks, `wf sync --check` and `wf spec-coverage`, are always in the
   gate. After you edit `gate:`, run `wf sync`: the gate table is part of the `/pre-mr-check` command
-  that wf writes.
+  that wf writes. A component's own steps come before yours.
+- `components:` is written by `wf add`. To change an answer, edit it here and run `wf sync`.
 
 ## Commands
 
@@ -211,6 +244,16 @@ Run `wf help` for the list, or `wf <command> -h` for one command.
 ### `wf init [--forge <forge>]`
 
 Starts using wf in a project. See [Start in a project](#start-in-a-project).
+
+### `wf add [<component>] [--<option> …] [--force]`
+
+Adds a component; with no component, lists them. `wf add <component> -h` lists its options and
+the flag for each. See [Components](#components). `--force` is
+passed on to its `wf sync`.
+
+### `wf <component> <command>`
+
+Runs a command of an installed component. `wf <component> -h` lists them, and so does `wf help`.
 
 ### `wf sync`
 
@@ -276,8 +319,8 @@ on.
 
 ### `wf version`, `wf help [--json]`
 
-`wf version` prints the version. `wf help` lists the commands. `--json` gives the list in a form an
-agent can read.
+`wf version` prints the version. `wf help` lists the commands, those of the installed components
+included. `--json` gives the list in a form an agent can read.
 
 ### Exit codes
 
@@ -341,6 +384,12 @@ What wf installs:
 | `.wf.yml: names no forge`, `forge: … is not one wf has a base for` | Set `forge:` to a forge wf knows: `gitlab` |
 | `.wf.yml: gate[0] (lint) needs …` | Give that step what it names: `name:`, `paths:` as a list, `run:` |
 | `.wf.yml: worktree.copy …`, `worktree.skip …` | Make it a list of globs, such as `[".env*"]`, and check each pattern |
+| `.wf.yml: components.<name> is not a component wf knows` | Run the wf version that added it: `.wf.yml` pins it |
+| `<component> and another part of the base both have <file>` | Two components clash; add only one of them, and report it |
+| `the <component> component is not installed` | Run `wf add <component>` |
+| `.wf.yml: components.<name>.<option> …` | Give that answer one the component accepts, as `wf add <name> -h` lists |
+| `… is installed already` | Change its answers under `components:` in `.wf.yml`, then run `wf sync` |
+| `wf add can only add to components: written out in full` | `components:` comes from a YAML alias (`*name`) or a merge key (`<<:`). Write the components out under `components:` itself, then run `wf add` again |
 | `… uses <key>, which .wf.yml does not set` | Add the key it names to `.wf.yml` |
 | `has more than one branch` (worktree) | Delete the branch you don't want, or work in the one you do |
 

@@ -609,7 +609,7 @@ func syncProject(dir string, force bool) (render.Report, error) {
 	if err != nil {
 		return render.Report{}, err
 	}
-	return render.Sync(dir, config, version, force)
+	return render.Sync(dir, config, nil, version, force)
 }
 
 // checkProject compares the project at dir with what a sync would write, as wf sync --check does.
@@ -618,7 +618,7 @@ func checkProject(dir string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return render.Check(dir, config, version)
+	return render.Check(dir, config, nil, version)
 }
 
 // showSkill returns a skill of the project at dir, as wf show does.
@@ -627,5 +627,5 @@ func showSkill(dir, name string, baseOnly bool) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return render.Skill(dir, config, version, name, baseOnly)
+	return render.Skill(dir, config, nil, version, name, baseOnly)
 }
