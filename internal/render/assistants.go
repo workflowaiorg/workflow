@@ -25,8 +25,8 @@ func (src source) files(header string) ([]File, error) {
 			{Path: ".github/copilot-instructions.md", Data: data},
 		}, nil
 
-	case guide:
-		return []File{{Path: ".workflow/GUIDE.md", Data: doc.bytes(header)}}, nil
+	case workflowFile:
+		return []File{{Path: ".workflow/" + src.name + ".md", Data: doc.bytes(header)}}, nil
 
 	case skill:
 		for _, key := range []string{"name", "description"} {
@@ -124,7 +124,8 @@ func generatable(file string) bool {
 		return false
 	}
 	for _, pattern := range []string{
-		"AGENTS.md", ".claude/CLAUDE.md", ".github/copilot-instructions.md", ".workflow/GUIDE.md",
+		"AGENTS.md", ".claude/CLAUDE.md", ".github/copilot-instructions.md",
+		".workflow/GUIDE.md", ".workflow/SPEC-TEMPLATE.md", ".workflow/DECISION-TEMPLATE.md",
 		".claude/skills/*/SKILL.md", ".github/skills/*/SKILL.md", ".opencode/skills/*/SKILL.md",
 		".claude/commands/*.md", ".github/prompts/*.prompt.md", ".opencode/commands/*.md",
 		".claude/agents/*.md", ".github/agents/*.agent.md", ".opencode/agents/*.md",
@@ -139,7 +140,7 @@ func generatable(file string) bool {
 // where names src's source files in errors.
 func (src source) where() string {
 	switch src.kind {
-	case instructions, guide:
+	case instructions, workflowFile:
 		return ".agents/{base,project}/" + src.name + ".md"
 	case skill:
 		return ".agents/{base,project}/skills/" + src.name + "/SKILL.md"

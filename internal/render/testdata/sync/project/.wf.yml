@@ -1,3 +1,4 @@
 wf: 0.1.0
+forge: gitlab
 name: sample
 test: go test ./...

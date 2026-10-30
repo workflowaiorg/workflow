@@ -2,14 +2,19 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"slices"
 	"strings"
 	"text/tabwriter"
+	"time"
+
+	"golang.org/x/term"
 
 	"github.com/workflowaiorg/workflow/internal/render"
 )
@@ -35,23 +40,30 @@ type Command struct {
 	run     func(app *App, args []string) error
 }
 
-// App holds what every command needs: the version wf reports, the project it works on, and where
-// it writes.
+// App holds what every command needs: the version wf reports, the project it works on, where it
+// reads answers from, and where it writes.
 type App struct {
-	version  string
-	dir      string
-	stdout   io.Writer
-	stderr   io.Writer
-	commands []Command
+	version string
+	dir     string
+	stdin   *bufio.Reader
+	// interactive is whether stdin is a terminal a person answers questions on.
+	interactive bool
+	stdout      io.Writer
+	stderr      io.Writer
+	commands    []Command
+	now         func() time.Time
 }
 
-// New returns wf's command line, reporting version, working on the project at dir, and writing to
-// stdout and stderr.
-func New(version, dir string, stdout, stderr io.Writer) *App {
-	app := &App{version: version, dir: dir, stdout: stdout, stderr: stderr}
+// New returns wf's command line, reporting version, working on the project at dir, reading answers
+// from stdin and writing to stdout and stderr. wf asks a question only when stdin is a terminal.
+func New(version, dir string, stdin io.Reader, stdout, stderr io.Writer) *App {
+	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, now: time.Now}
 	app.commands = []Command{
+		{Name: "init", Usage: "wf init [--forge <forge>]", Summary: "Start using wf in this project: .wf.yml, the base, and every assistant's files", run: runInit},
 		{Name: "sync", Usage: "wf sync [--check | --force]", Summary: "Write every assistant's files from .agents; --check only compares", run: runSync},
 		{Name: "show", Usage: "wf show <skill> [--base]", Summary: "Print a skill as an assistant reads it; --base for wf's part alone", run: runShow},
+		{Name: "worktree", Usage: "wf worktree <issue> <slug> | wf worktree plan <slug>", Summary: "Give an Issue or a plan its own worktree, or find it; prints its path last", run: runWorktree},
+		{Name: "spec-coverage", Usage: "wf spec-coverage [--report-only]", Summary: "Check that specs, decision records and their index agree", run: runSpecCoverage},
 		{Name: "version", Usage: "wf version", Summary: "Print wf's version", run: runVersion},
 		{Name: "help", Usage: "wf help [--json]", Summary: "List wf's commands; --json for agents", run: runHelp},
 	}
@@ -102,6 +114,33 @@ func (app *App) parseFlags(flags *flag.FlagSet, args []string) error {
 		return fmt.Errorf("%w: %v", errUsage, err)
 	}
 	return nil
+}
+
+// ask returns the answer to question, or fallback when it is left empty. With no terminal to ask
+// on, it fails naming the flag that gives the answer instead, rather than wait for an answer
+// nobody will type: an agent has no terminal, so it asks the developer and passes the flag.
+func (app *App) ask(question, fallback, flagName string) (string, error) {
+	if !app.interactive {
+		return "", fmt.Errorf("%w: no terminal to ask %q on; pass --%s", errUsage, question, flagName)
+	}
+	fmt.Fprintf(app.stdout, "%s [%s]: ", question, fallback)
+	answer, err := app.stdin.ReadString('\n')
+	if errors.Is(err, io.EOF) && answer == "" {
+		return "", fmt.Errorf("%w: no answer to %q; pass --%s", errUsage, question, flagName)
+	}
+	if err != nil && !errors.Is(err, io.EOF) {
+		return "", fmt.Errorf("reading the answer to %q: %w", question, err)
+	}
+	if answer = strings.TrimSpace(answer); answer != "" {
+		return answer, nil
+	}
+	return fallback, nil
+}
+
+// isTerminal says whether stdin is a terminal rather than a pipe, a file or /dev/null.
+func isTerminal(stdin io.Reader) bool {
+	file, ok := stdin.(*os.File)
+	return ok && term.IsTerminal(int(file.Fd()))
 }
 
 func runVersion(app *App, args []string) error {

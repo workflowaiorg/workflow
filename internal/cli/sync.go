@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 
+	"github.com/workflowaiorg/workflow/internal/base"
 	"github.com/workflowaiorg/workflow/internal/render"
 )
 
@@ -22,26 +23,43 @@ func runSync(app *App, args []string) error {
 		return fmt.Errorf("%w: --check writes nothing, so it takes no --force", errUsage)
 	}
 
-	if *check {
-		differences, err := render.Check(app.dir, app.version)
-		if err != nil {
-			return err
-		}
-		if len(differences) > 0 {
-			for _, difference := range differences {
-				fmt.Fprintln(app.stderr, "  "+difference)
-			}
-			if len(differences) == 1 {
-				return errors.New("1 generated file differs from what wf sync writes; run wf sync")
-			}
-			return fmt.Errorf("%d generated files differ from what wf sync writes; run wf sync", len(differences))
-		}
-		fmt.Fprintln(app.stdout, "Every generated file is up to date.")
-		return nil
+	if err := base.Validate(app.dir); err != nil {
+		return err
 	}
-
-	// What was done before a failure is still printed, so the developer knows what changed.
+	if *check {
+		return app.check()
+	}
 	report, err := render.Sync(app.dir, app.version, *force)
+	return app.reportSync(report, err)
+}
+
+// check compares the generated files, and .agents/base, with what this version of wf writes.
+func (app *App) check() error {
+	differences, err := render.Check(app.dir, app.version)
+	if err != nil {
+		return err
+	}
+	baseDifferences, err := base.Check(app.dir, app.version)
+	if err != nil {
+		return err
+	}
+	differences = append(differences, baseDifferences...)
+	if len(differences) > 0 {
+		for _, difference := range differences {
+			fmt.Fprintln(app.stderr, "  "+difference)
+		}
+		if len(differences) == 1 {
+			return fmt.Errorf("1 file differs from what wf %s writes", app.version)
+		}
+		return fmt.Errorf("%d files differ from what wf %s writes", len(differences), app.version)
+	}
+	fmt.Fprintln(app.stdout, "Every generated file is up to date, and .agents/base is wf's.")
+	return nil
+}
+
+// reportSync prints what a sync did and returns its error. What was done before a failure is
+// still printed, so the developer knows what changed.
+func (app *App) reportSync(report render.Report, err error) error {
 	for _, path := range report.Written {
 		fmt.Fprintln(app.stdout, "wrote    "+path)
 	}
@@ -88,6 +106,9 @@ func runShow(app *App, args []string) error {
 		return fmt.Errorf("%w: names one skill", errUsage)
 	}
 
+	if err := base.Validate(app.dir); err != nil {
+		return err
+	}
 	content, err := render.Skill(app.dir, app.version, names[0], *baseOnly)
 	if err != nil {
 		return err

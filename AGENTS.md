@@ -19,7 +19,10 @@ GitHub Issues; the milestone says which release each belongs to.
    and what you are unsure about.
 5. **A question or concern about the design is answered in chat** with a recommendation and its
    trade-off. Nothing is rewritten until the developer agrees.
-6. **Merging** is the developer's call. A PR with more than one commit is squashed only if they say so.
+6. **The README is the user's manual, and it stays true.** A PR that changes what a user runs,
+   writes or sees — a command, a flag, a setting, a file wf writes, a message — updates `README.md`
+   in the same PR, in plain words and with an example.
+7. **Merging** is the developer's call. A PR with more than one commit is squashed only if they say so.
 
 Commit messages: a summary line in plain words under ~72 characters, a blank line, then a list
 of what was done. No AI signatures, no tool output.
