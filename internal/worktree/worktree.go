@@ -18,9 +18,7 @@ import (
 	"slices"
 	"strings"
 
-	"go.yaml.in/yaml/v3"
-
-	"github.com/workflowaiorg/workflow/internal/render"
+	"github.com/workflowaiorg/workflow/internal/project"
 )
 
 // Dir is where worktrees are made, relative to the main checkout.
@@ -47,6 +45,12 @@ func Open(dir, issue, slug string) (Result, error) {
 		return Result{}, err
 	}
 	root := filepath.Dir(common)
+	// The settings are read before anything is made, so a mistake in them leaves nothing behind. A
+	// project with no .wf.yml copies nothing.
+	config, err := project.Load(root)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return Result{}, err
+	}
 
 	what, owned, exact := "Issue #"+issue, issue+"-", false
 	if issue == "plan" {
@@ -134,7 +138,7 @@ func Open(dir, issue, slug string) (Result, error) {
 		return Result{}, fmt.Errorf("%s has more than one branch; say which one to continue:\n%s", what, strings.Join(branches, "\n"))
 	}
 
-	notes, err := copyIgnored(root, worktree)
+	notes, err := copyIgnored(root, worktree, config.Worktree)
 	if err != nil {
 		if undoErr := undo(); undoErr != nil {
 			return Result{}, fmt.Errorf("copying into the new worktree failed: %w; removing it failed too, so %s is left half-made: %w", err, worktree, undoErr)
@@ -147,38 +151,15 @@ func Open(dir, issue, slug string) (Result, error) {
 	return Result{Path: worktree, Notes: notes}, nil
 }
 
-// config is the part of .wf.yml this package reads.
-type config struct {
-	Worktree struct {
-		// Copy holds globs, from the root, of the gitignored files a new worktree needs.
-		Copy []string `yaml:"copy"`
-		// Skip holds globs of what Copy matches but must not be copied, such as "*.example". Each
-		// is matched against the path from the root and against the file's name.
-		Skip []string `yaml:"skip"`
-	} `yaml:"worktree"`
-}
-
-// copyIgnored copies from root into worktree what .wf.yml lists under worktree: and git ignores.
-// What git does not ignore is not copied: a tracked file is in the worktree already, and an
-// untracked one would make it look changed.
-func copyIgnored(root, worktree string) ([]string, error) {
-	content, err := render.ReadText(filepath.Join(root, render.ConfigFile))
-	if errors.Is(err, fs.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("reading %s: %w", render.ConfigFile, err)
-	}
-	var read config
-	if err := yaml.Unmarshal(content, &read); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", render.ConfigFile, err)
-	}
-
+// copyIgnored copies from root into worktree what settings list and git ignores. What git does
+// not ignore is not copied: a tracked file is in the worktree already, and an untracked one would
+// make it look changed.
+func copyIgnored(root, worktree string, settings project.Worktree) ([]string, error) {
 	var notes []string
-	for _, pattern := range read.Worktree.Copy {
+	for _, pattern := range settings.Copy {
 		matches, err := filepath.Glob(filepath.Join(root, filepath.FromSlash(pattern)))
 		if err != nil {
-			return nil, fmt.Errorf("%s: worktree.copy has a bad pattern %q", render.ConfigFile, pattern)
+			return nil, fmt.Errorf("copying %s: %w", pattern, err)
 		}
 		for _, match := range matches {
 			rel, err := filepath.Rel(root, match)
@@ -186,7 +167,7 @@ func copyIgnored(root, worktree string) ([]string, error) {
 				return nil, fmt.Errorf("copying %s: %w", match, err)
 			}
 			rel = filepath.ToSlash(rel)
-			if slices.ContainsFunc(read.Worktree.Skip, func(skip string) bool {
+			if slices.ContainsFunc(settings.Skip, func(skip string) bool {
 				byPath, _ := path.Match(skip, rel)
 				byName, _ := path.Match(skip, path.Base(rel))
 				return byPath || byName

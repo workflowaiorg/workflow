@@ -326,12 +326,15 @@ func TestABadSettingIsNamedBeforeAnythingIsWritten(t *testing.T) {
 		to   string
 		want string
 	}{
+		{name: "no version pin", from: "wf: ", to: "# wf: ", want: "pins no wf version"},
 		{name: "no forge", from: "forge: gitlab\n", to: "", want: "add forge: gitlab"},
 		{name: "an unknown forge", from: "forge: gitlab", to: "forge: github", want: "forge: github is not one wf has a base for"},
 		{name: "a gate step with no paths", from: "# gate:", to: "gate:\n  - name: lint\n    run: make lint\n#", want: "gate[0] (lint) needs paths:"},
 		{name: "a gate step whose paths is one string", from: "# gate:", to: "gate:\n  - name: lint\n    paths: \"*.go\"\n    run: make lint\n#", want: "gate[0] (lint) needs paths:"},
 		{name: "a gate step with no name or run", from: "# gate:", to: "gate:\n  - paths: [\"*.go\"]\n#", want: "gate[0] needs name: the step's name, run: the command"},
 		{name: "a gate that is not a list", from: "# gate:", to: "gate: make lint\n#", want: "gate: is a list of steps"},
+		{name: "a worktree glob that is no pattern", from: "# worktree:", to: "worktree:\n  copy: [\"[\"]\n#", want: `worktree.copy has a bad pattern "["`},
+		{name: "a worktree copy that is one string", from: "# worktree:", to: "worktree:\n  copy: .env\n#", want: "worktree.copy is a list of globs"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

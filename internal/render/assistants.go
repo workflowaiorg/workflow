@@ -140,8 +140,10 @@ func generatable(file string) bool {
 // where names src's source files in errors.
 func (src source) where() string {
 	switch src.kind {
-	case instructions, workflowFile:
+	case instructions:
 		return ".agents/{base,project}/" + src.name + ".md"
+	case workflowFile:
+		return ".agents/{base,project}/workflow/" + src.name + ".md"
 	case skill:
 		return ".agents/{base,project}/skills/" + src.name + "/SKILL.md"
 	case command:

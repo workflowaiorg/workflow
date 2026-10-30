@@ -16,7 +16,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/workflowaiorg/workflow/internal/render"
+	"github.com/workflowaiorg/workflow/internal/project"
 )
 
 // Exit codes. Usage errors are told apart from failures, so a script can tell a typo from a fault.
@@ -91,8 +91,8 @@ func (app *App) Run(args []string) int {
 			return exitOK
 		}
 		fmt.Fprintf(app.stderr, "wf %s: %v\n", name, err)
-		var notFound *render.NotFoundError
-		if errors.Is(err, errUsage) || errors.As(err, &notFound) {
+		var mistake *project.UserError
+		if errors.Is(err, errUsage) || errors.As(err, &mistake) {
 			return exitUsage
 		}
 		return exitFailure

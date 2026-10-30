@@ -164,6 +164,19 @@ func TestOpenRemovesAWorktreeItCouldNotFill(t *testing.T) {
 	}
 }
 
+func TestOpenLeavesNothingWhenTheSettingsAreWrong(t *testing.T) {
+	dir := repository(t)
+	if err := os.WriteFile(filepath.Join(dir, ".wf.yml"), []byte("wf: 0.1.0\nforge: gitlab\nworktree:\n  copy: .env\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := worktree.Open(dir, "17", "settings"); err == nil || !strings.Contains(err.Error(), "worktree.copy is a list of globs") {
+		t.Fatalf("Open with a bad worktree: = %v, want an error naming it", err)
+	}
+	if branches := run(t, dir, "branch", "--list", "17-*"); branches != "" {
+		t.Errorf("Open made the branch %q before reading the settings", branches)
+	}
+}
+
 func TestOpenSaysWhenWorktreesAreNotIgnored(t *testing.T) {
 	dir := repository(t)
 	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(".env*\n/cache\n"), 0o644); err != nil {
