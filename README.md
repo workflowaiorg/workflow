@@ -166,8 +166,8 @@ and every subagent only reads and reports.
 
 **The two templates take no part of yours.** `.workflow/SPEC-TEMPLATE.md` and
 `.workflow/DECISION-TEMPLATE.md` are copied whole into every new spec and record, so anything added
-to them would land in each one. `wf sync` refuses `.agents/project/SPEC-TEMPLATE.md` and
-`.agents/project/DECISION-TEMPLATE.md`. Say what your project's specs need, such as which contracts
+to them would land in each one. `wf sync` refuses `.agents/project/workflow/SPEC-TEMPLATE.md` and
+`.agents/project/workflow/DECISION-TEMPLATE.md`. Say what your project's specs need, such as which contracts
 they point to, in `.agents/project/skills/domain-specs/SKILL.md`.
 
 **Never edit a generated file.** Every file wf writes starts with a line that says so. The next
@@ -178,7 +178,7 @@ they point to, in `.agents/project/skills/domain-specs/SKILL.md`.
 
 ```yaml
 # wf's version this project uses, and the forge its Issues live on. wf init writes both.
-wf: v0.1.0
+wf: 0.1.0
 forge: gitlab
 
 # Files git ignores that a new worktree needs, such as env files. Globs, from the project root.
@@ -196,8 +196,8 @@ gate:
     run: go test ./...
 ```
 
-- `wf` and `forge` are required. `wf sync` and `wf show` check every setting first, and change
-  nothing when one is wrong.
+- `wf` and `forge` are required. `wf sync`, `wf show` and `wf worktree` check every setting first,
+  name every mistake at once, and change nothing when there is one.
 - `worktree:` is optional. wf copies only files git ignores. A file git tracks is already in the
   worktree, and copying an untracked one would make the worktree look changed.
 - `gate:` is optional. wf's two checks, `wf sync --check` and `wf spec-coverage`, are always in the
@@ -298,7 +298,7 @@ the flag to pass.
 .agents/base/                        wf's part; never edited
 .agents/project/                     your part, in the same layout:
   AGENTS.md                            → AGENTS.md, .claude/CLAUDE.md, .github/copilot-instructions.md
-  GUIDE.md                             → .workflow/GUIDE.md
+  workflow/GUIDE.md                    → .workflow/GUIDE.md
   skills/<name>/SKILL.md               → .claude/skills/, .github/skills/, .opencode/skills/
   commands/<name>.md                   → .claude/commands/, .github/prompts/, .opencode/commands/
   subagents/<name>.md                  → .claude/agents/, .github/agents/, .opencode/agents/
@@ -337,8 +337,10 @@ What wf installs:
 | `skipped … (not written by wf)` | A file of your own is at a path wf writes to. Move it, or run `wf sync --force` to replace it |
 | `kept … (no longer generated, but edited by hand)` | wf no longer writes this file, and someone edited it. Delete it yourself if you don't need it |
 | `a template takes no project part` | Move that text into `.agents/project/skills/domain-specs/SKILL.md` and delete the file |
+| `.wf.yml: pins no wf version` | Add `wf:` with the version `wf version` prints, such as `wf: 0.1.0` |
 | `.wf.yml: names no forge`, `forge: … is not one wf has a base for` | Set `forge:` to a forge wf knows: `gitlab` |
 | `.wf.yml: gate[0] (lint) needs …` | Give that step what it names: `name:`, `paths:` as a list, `run:` |
+| `.wf.yml: worktree.copy …`, `worktree.skip …` | Make it a list of globs, such as `[".env*"]`, and check each pattern |
 | `… uses <key>, which .wf.yml does not set` | Add the key it names to `.wf.yml` |
 | `has more than one branch` (worktree) | Delete the branch you don't want, or work in the one you do |
 

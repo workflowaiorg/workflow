@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/workflowaiorg/workflow/internal/project"
 	"github.com/workflowaiorg/workflow/internal/render"
 )
 
@@ -54,10 +55,10 @@ func tree(t *testing.T, root string, skip ...string) map[string][]byte {
 // testdata/sync/want. After an intended change, go test ./internal/render -update rewrites want.
 func TestSyncGolden(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
-	got := tree(t, dir, ".agents/", render.ConfigFile)
+	got := tree(t, dir, ".agents/", project.ConfigFile)
 
 	const wantDir = "testdata/sync/want"
 	if *update {
@@ -67,7 +68,7 @@ func TestSyncGolden(t *testing.T) {
 		if err := os.CopyFS(wantDir, os.DirFS(dir)); err != nil {
 			t.Fatal(err)
 		}
-		for _, input := range []string{".agents", render.ConfigFile} {
+		for _, input := range []string{".agents", project.ConfigFile} {
 			if err := os.RemoveAll(filepath.Join(wantDir, input)); err != nil {
 				t.Fatal(err)
 			}
@@ -89,10 +90,10 @@ func TestSyncGolden(t *testing.T) {
 
 func TestCheckNamesAHandEditedFile(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
-	if differences, err := render.Check(dir, version); err != nil || len(differences) > 0 {
+	if differences, err := checkProject(dir); err != nil || len(differences) > 0 {
 		t.Fatalf("Check right after Sync = (%v, %v), want nothing", differences, err)
 	}
 
@@ -100,7 +101,7 @@ func TestCheckNamesAHandEditedFile(t *testing.T) {
 	if err := os.WriteFile(edited, []byte("edited by hand\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	differences, err := render.Check(dir, version)
+	differences, err := checkProject(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,28 +112,28 @@ func TestCheckNamesAHandEditedFile(t *testing.T) {
 
 func TestSyncLeavesTheProjectPartAlone(t *testing.T) {
 	dir := sample(t)
-	before := tree(t, filepath.Join(dir, render.ProjectDir))
-	if _, err := render.Sync(dir, version, false); err != nil {
+	before := tree(t, filepath.Join(dir, project.ProjectDir))
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
-	after := tree(t, filepath.Join(dir, render.ProjectDir))
+	after := tree(t, filepath.Join(dir, project.ProjectDir))
 
 	if len(after) != len(before) {
 		t.Errorf("project part had %d files before sync and %d after", len(before), len(after))
 	}
 	for path, content := range before {
 		if !bytes.Equal(after[path], content) {
-			t.Errorf("sync changed %s/%s", render.ProjectDir, path)
+			t.Errorf("sync changed %s/%s", project.ProjectDir, path)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(dir, render.ProjectDir, "skills/notes/SKILL.md")); err == nil {
+	if _, err := os.Stat(filepath.Join(dir, project.ProjectDir, "skills/notes/SKILL.md")); err == nil {
 		t.Error("sync created a project part for notes, which has none")
 	}
 }
 
 func TestSyncRemovesOnlyWhatItGenerated(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	ownSkill := filepath.Join(dir, ".claude/skills/handmade/SKILL.md")
@@ -142,11 +143,11 @@ func TestSyncRemovesOnlyWhatItGenerated(t *testing.T) {
 	if err := os.WriteFile(ownSkill, []byte("a skill wf never wrote\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(dir, render.BaseDir, "skills/notes")); err != nil {
+	if err := os.RemoveAll(filepath.Join(dir, project.BaseDir, "skills/notes")); err != nil {
 		t.Fatal(err)
 	}
 
-	report, err := render.Sync(dir, version, false)
+	report, err := syncProject(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,14 +178,14 @@ func TestSyncRefusesALockListingAFileItNeverGenerates(t *testing.T) {
 		t.Run(path, func(t *testing.T) {
 			dir := sample(t)
 			lock := "wf: 0.1.0\nfiles:\n  " + path + ": sha256:00\n"
-			if err := os.WriteFile(filepath.Join(dir, render.LockFile), []byte(lock), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, project.LockFile), []byte(lock), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := render.Sync(dir, version, false); err == nil || !strings.Contains(err.Error(), "is not a file wf generates") {
+			if _, err := syncProject(dir, false); err == nil || !strings.Contains(err.Error(), "is not a file wf generates") {
 				t.Errorf("Sync = %v, want the lock entry refused", err)
 			}
-			if _, err := os.Stat(filepath.Join(dir, render.ConfigFile)); err != nil {
-				t.Errorf("Sync removed %s: %v", render.ConfigFile, err)
+			if _, err := os.Stat(filepath.Join(dir, project.ConfigFile)); err != nil {
+				t.Errorf("Sync removed %s: %v", project.ConfigFile, err)
 			}
 		})
 	}
@@ -197,7 +198,7 @@ func TestSyncSkipsWhatWasNotItsOwnUnlessForced(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "AGENTS.md"), own, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	report, err := render.Sync(dir, version, false)
+	report, err := syncProject(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,7 +208,7 @@ func TestSyncSkipsWhatWasNotItsOwnUnlessForced(t *testing.T) {
 	if content, _ := os.ReadFile(filepath.Join(dir, "AGENTS.md")); !bytes.Equal(content, own) {
 		t.Errorf("sync without --force overwrote AGENTS.md:\n%s", content)
 	}
-	differences, err := render.Check(dir, version)
+	differences, err := checkProject(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,14 +216,14 @@ func TestSyncSkipsWhatWasNotItsOwnUnlessForced(t *testing.T) {
 		t.Errorf("Check = %q, want AGENTS.md named as not written by wf", differences)
 	}
 
-	report, err = render.Sync(dir, version, true)
+	report, err = syncProject(dir, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Equal(report.Replaced, []string{"AGENTS.md"}) {
 		t.Errorf("sync --force replaced %v, want [AGENTS.md]", report.Replaced)
 	}
-	if differences, err := render.Check(dir, version); err != nil || len(differences) > 0 {
+	if differences, err := checkProject(dir); err != nil || len(differences) > 0 {
 		t.Errorf("Check after sync --force = (%q, %v), want nothing", differences, err)
 	}
 }
@@ -237,7 +238,7 @@ func TestSyncRefusesToWriteThroughASymlink(t *testing.T) {
 	for link, target := range links {
 		t.Run(link, func(t *testing.T) {
 			dir := sample(t)
-			before := tree(t, filepath.Join(dir, render.ProjectDir))
+			before := tree(t, filepath.Join(dir, project.ProjectDir))
 			full := filepath.Join(dir, filepath.FromSlash(link))
 			if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 				t.Fatal(err)
@@ -246,20 +247,20 @@ func TestSyncRefusesToWriteThroughASymlink(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			_, err := render.Sync(dir, version, true)
+			_, err := syncProject(dir, true)
 			if err == nil || !strings.Contains(err.Error(), link+" is a symbolic link") {
 				t.Errorf("Sync = %v, want an error naming %s", err, link)
 			}
-			after := tree(t, filepath.Join(dir, render.ProjectDir))
+			after := tree(t, filepath.Join(dir, project.ProjectDir))
 			if len(after) != len(before) {
 				t.Errorf("project part had %d files before and %d after", len(before), len(after))
 			}
 			for path, content := range before {
 				if !bytes.Equal(after[path], content) {
-					t.Errorf("sync wrote %s/%s through the link", render.ProjectDir, path)
+					t.Errorf("sync wrote %s/%s through the link", project.ProjectDir, path)
 				}
 			}
-			if _, err := os.Stat(filepath.Join(dir, render.LockFile)); err == nil {
+			if _, err := os.Stat(filepath.Join(dir, project.LockFile)); err == nil {
 				t.Error("sync wrote .wf.lock although it refused")
 			}
 		})
@@ -268,14 +269,14 @@ func TestSyncRefusesToWriteThroughASymlink(t *testing.T) {
 
 func TestSyncReplacesItsOwnFileEditedByHand(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	edited := filepath.Join(dir, ".claude/skills/hello/SKILL.md")
 	if err := os.WriteFile(edited, []byte("edited by hand\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	report, err := render.Sync(dir, version, false)
+	report, err := syncProject(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -291,7 +292,7 @@ func TestSyncReplacesItsOwnFileEditedByHand(t *testing.T) {
 
 func TestSyncRefusesToRemoveThroughASymlink(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	// .claude/skills/notes becomes a link to a directory outside the project, holding the same file.
@@ -310,11 +311,11 @@ func TestSyncRefusesToRemoveThroughASymlink(t *testing.T) {
 	if err := os.Symlink(outside, notes); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(dir, render.BaseDir, "skills/notes")); err != nil {
+	if err := os.RemoveAll(filepath.Join(dir, project.BaseDir, "skills/notes")); err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := render.Sync(dir, version, false); err == nil || !strings.Contains(err.Error(), ".claude/skills/notes is a symbolic link") {
+	if _, err := syncProject(dir, false); err == nil || !strings.Contains(err.Error(), ".claude/skills/notes is a symbolic link") {
 		t.Errorf("Sync = %v, want an error naming the link", err)
 	}
 	if _, err := os.Stat(filepath.Join(outside, "SKILL.md")); err != nil {
@@ -324,18 +325,18 @@ func TestSyncRefusesToRemoveThroughASymlink(t *testing.T) {
 
 func TestSyncKeepsAStaleFileEditedByHand(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	edited := filepath.Join(dir, ".github/skills/notes/SKILL.md")
 	if err := os.WriteFile(edited, []byte("edited by hand\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(dir, render.BaseDir, "skills/notes")); err != nil {
+	if err := os.RemoveAll(filepath.Join(dir, project.BaseDir, "skills/notes")); err != nil {
 		t.Fatal(err)
 	}
 
-	report, err := render.Sync(dir, version, false)
+	report, err := syncProject(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -350,7 +351,7 @@ func TestSyncKeepsAStaleFileEditedByHand(t *testing.T) {
 	}
 
 	// Every later check names it, until the developer removes it.
-	differences, err := render.Check(dir, version)
+	differences, err := checkProject(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,23 +361,23 @@ func TestSyncKeepsAStaleFileEditedByHand(t *testing.T) {
 	if err := os.Remove(edited); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
-	if differences, err := render.Check(dir, version); err != nil || len(differences) > 0 {
+	if differences, err := checkProject(dir); err != nil || len(differences) > 0 {
 		t.Errorf("Check once it is removed = (%q, %v), want nothing", differences, err)
 	}
 }
 
 func TestCheckNamesStaleFilesAndTheLock(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(dir, render.BaseDir, "skills/notes")); err != nil {
+	if err := os.RemoveAll(filepath.Join(dir, project.BaseDir, "skills/notes")); err != nil {
 		t.Fatal(err)
 	}
-	differences, err := render.Check(dir, version)
+	differences, err := checkProject(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -395,10 +396,10 @@ func TestCheckNamesStaleFilesAndTheLock(t *testing.T) {
 		}
 	}
 
-	if err := os.Remove(filepath.Join(dir, render.LockFile)); err != nil {
+	if err := os.Remove(filepath.Join(dir, project.LockFile)); err != nil {
 		t.Fatal(err)
 	}
-	differences, err = render.Check(dir, version)
+	differences, err = checkProject(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -409,13 +410,13 @@ func TestCheckNamesStaleFilesAndTheLock(t *testing.T) {
 
 func TestSyncReadsWindowsLineEndings(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
 	// Inputs, generated files and the lock alike, as a checkout with core.autocrlf has them.
 	for _, input := range []string{
-		render.ConfigFile, ".agents/project/skills/naming/SKILL.md", ".agents/base/AGENTS.md",
-		".claude/skills/hello/SKILL.md", "AGENTS.md", render.LockFile,
+		project.ConfigFile, ".agents/project/skills/naming/SKILL.md", ".agents/base/AGENTS.md",
+		".claude/skills/hello/SKILL.md", "AGENTS.md", project.LockFile,
 	} {
 		full := filepath.Join(dir, filepath.FromSlash(input))
 		content, err := os.ReadFile(full)
@@ -426,10 +427,10 @@ func TestSyncReadsWindowsLineEndings(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if differences, err := render.Check(dir, version); err != nil || len(differences) > 0 {
+	if differences, err := checkProject(dir); err != nil || len(differences) > 0 {
 		t.Errorf("Check after CRLF files = (%q, %v), want the same as with LF", differences, err)
 	}
-	report, err := render.Sync(dir, version, false)
+	report, err := syncProject(dir, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -446,7 +447,7 @@ func TestSyncReadsWindowsLineEndings(t *testing.T) {
 	if err := os.WriteFile(naming, append([]byte("\xef\xbb\xbf"), content...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if differences, err := render.Check(dir, version); err != nil || len(differences) > 0 {
+	if differences, err := checkProject(dir); err != nil || len(differences) > 0 {
 		t.Errorf("Check after a byte order mark = (%q, %v), want nothing", differences, err)
 	}
 }
@@ -469,7 +470,7 @@ func TestSyncKeepsAProjectPartsShape(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
 
@@ -510,7 +511,7 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 		},
 		{
 			name:    "a template naming a key .wf.yml lacks",
-			path:    ".agents/base/GUIDE.md",
+			path:    ".agents/base/workflow/GUIDE.md",
 			content: "[[ .missing ]]\n",
 			want:    "missing",
 		},
@@ -534,7 +535,7 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 		},
 		{
 			name:    "a project part for a template",
-			path:    ".agents/project/SPEC-TEMPLATE.md",
+			path:    ".agents/project/workflow/SPEC-TEMPLATE.md",
 			content: "Pinned elsewhere: the manifest.\n",
 			want:    "a template takes no project part",
 		},
@@ -555,7 +556,7 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 			if err := os.WriteFile(full, []byte(test.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := render.Sync(dir, version, false); err == nil || !strings.Contains(err.Error(), test.want) {
+			if _, err := syncProject(dir, false); err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Errorf("Sync = %v, want an error containing %q", err, test.want)
 			}
 		})
@@ -563,18 +564,18 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 }
 
 func TestSyncNeedsTheConfig(t *testing.T) {
-	if _, err := render.Sync(t.TempDir(), version, false); err == nil || !strings.Contains(err.Error(), render.ConfigFile) {
-		t.Errorf("Sync = %v, want an error naming %s", err, render.ConfigFile)
+	if _, err := syncProject(t.TempDir(), false); err == nil || !strings.Contains(err.Error(), project.ConfigFile) {
+		t.Errorf("Sync = %v, want an error naming %s", err, project.ConfigFile)
 	}
 }
 
 func TestSkill(t *testing.T) {
 	dir := sample(t)
-	if _, err := render.Sync(dir, version, false); err != nil {
+	if _, err := syncProject(dir, false); err != nil {
 		t.Fatal(err)
 	}
 
-	shown, err := render.Skill(dir, version, "hello", false)
+	shown, err := showSkill(dir, "hello", false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -586,7 +587,7 @@ func TestSkill(t *testing.T) {
 		t.Errorf("Skill(hello) differs from the file sync wrote:\n%s", shown)
 	}
 
-	base, err := render.Skill(dir, version, "hello", true)
+	base, err := showSkill(dir, "hello", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -594,10 +595,37 @@ func TestSkill(t *testing.T) {
 		t.Errorf("Skill(hello, base) is not the rendered base alone:\n%s", base)
 	}
 
-	if _, err := render.Skill(dir, version, "local", true); err == nil {
+	if _, err := showSkill(dir, "local", true); err == nil {
 		t.Error("Skill(local, base) returned a base for a project-only skill")
 	}
-	if _, err := render.Skill(dir, version, "absent", false); err == nil {
+	if _, err := showSkill(dir, "absent", false); err == nil {
 		t.Error("Skill(absent) found a skill that does not exist")
 	}
+}
+
+// syncProject syncs the project at dir with its own settings, as wf sync does.
+func syncProject(dir string, force bool) (render.Report, error) {
+	config, err := project.Load(dir)
+	if err != nil {
+		return render.Report{}, err
+	}
+	return render.Sync(dir, config, version, force)
+}
+
+// checkProject compares the project at dir with what a sync would write, as wf sync --check does.
+func checkProject(dir string) ([]string, error) {
+	config, err := project.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	return render.Check(dir, config, version)
+}
+
+// showSkill returns a skill of the project at dir, as wf show does.
+func showSkill(dir, name string, baseOnly bool) ([]byte, error) {
+	config, err := project.Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	return render.Skill(dir, config, version, name, baseOnly)
 }

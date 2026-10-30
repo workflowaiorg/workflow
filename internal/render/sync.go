@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+
+	"github.com/workflowaiorg/workflow/internal/project"
 )
 
 // lock is .wf.lock: the wf version that wrote the generated files, and a hash of each. It is how
@@ -52,8 +54,8 @@ type plan struct {
 // Sync writes every generated file of the project at dir and its .wf.lock, and removes the files
 // an earlier sync generated that it no longer does. It never writes .agents/project. A file at a
 // generated path that wf did not write is skipped unless force is set.
-func Sync(dir, version string, force bool) (Report, error) {
-	p, err := newPlan(dir, version, force)
+func Sync(dir string, config project.Config, version string, force bool) (Report, error) {
+	p, err := newPlan(dir, config, version, force)
 	if err != nil {
 		return Report{}, err
 	}
@@ -86,19 +88,19 @@ func Sync(dir, version string, force bool) (Report, error) {
 		removeEmptyParents(dir, filepath.Dir(full))
 	}
 
-	if current, err := ReadText(filepath.Join(dir, LockFile)); err != nil || !bytes.Equal(current, p.lock) {
-		if err := writeFile(dir, LockFile, p.lock); err != nil {
+	if current, err := project.ReadText(filepath.Join(dir, project.LockFile)); err != nil || !bytes.Equal(current, p.lock) {
+		if err := writeFile(dir, project.LockFile, p.lock); err != nil {
 			return report, err
 		}
-		report.Written = append(report.Written, LockFile)
+		report.Written = append(report.Written, project.LockFile)
 	}
 	return report, nil
 }
 
 // Check compares the project at dir with what Sync would write, and writes nothing. It returns one
 // line per file that differs, naming it; none means the project is in sync.
-func Check(dir, version string) ([]string, error) {
-	p, err := newPlan(dir, version, false)
+func Check(dir string, config project.Config, version string) ([]string, error) {
+	p, err := newPlan(dir, config, version, false)
 	if err != nil {
 		return nil, err
 	}
@@ -121,20 +123,20 @@ func Check(dir, version string) ([]string, error) {
 	for _, kept := range p.kept {
 		differences = append(differences, kept+": no longer generated, but edited by hand; remove it yourself")
 	}
-	current, err := ReadText(filepath.Join(dir, LockFile))
+	current, err := project.ReadText(filepath.Join(dir, project.LockFile))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		differences = append(differences, LockFile+": missing")
+		differences = append(differences, project.LockFile+": missing")
 	case err != nil:
-		return nil, fmt.Errorf("reading %s: %w", LockFile, err)
+		return nil, fmt.Errorf("reading %s: %w", project.LockFile, err)
 	case !bytes.Equal(current, p.lock):
-		differences = append(differences, LockFile+": out of date")
+		differences = append(differences, project.LockFile+": out of date")
 	}
 	return differences, nil
 }
 
-func newPlan(dir, version string, force bool) (plan, error) {
-	files, err := Render(dir, version)
+func newPlan(dir string, config project.Config, version string, force bool) (plan, error) {
+	files, err := Render(dir, config, version)
 	if err != nil {
 		return plan{}, err
 	}
@@ -146,7 +148,7 @@ func newPlan(dir, version string, force bool) (plan, error) {
 
 	// Every path wf may write or remove is checked before anything is written, so a link that
 	// would lead a write elsewhere stops the whole sync rather than half of it.
-	paths := []string{LockFile}
+	paths := []string{project.LockFile}
 	for _, file := range files {
 		paths = append(paths, file.Path)
 	}
@@ -160,7 +162,7 @@ func newPlan(dir, version string, force bool) (plan, error) {
 	}
 
 	read := func(path string) error {
-		content, err := ReadText(filepath.Join(dir, filepath.FromSlash(path)))
+		content, err := project.ReadText(filepath.Join(dir, filepath.FromSlash(path)))
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -211,32 +213,32 @@ func newPlan(dir, version string, force bool) (plan, error) {
 	encoder := yaml.NewEncoder(encoded)
 	encoder.SetIndent(2)
 	if err := encoder.Encode(next); err != nil {
-		return plan{}, fmt.Errorf("writing %s: %w", LockFile, err)
+		return plan{}, fmt.Errorf("writing %s: %w", project.LockFile, err)
 	}
 	if err := encoder.Close(); err != nil {
-		return plan{}, fmt.Errorf("writing %s: %w", LockFile, err)
+		return plan{}, fmt.Errorf("writing %s: %w", project.LockFile, err)
 	}
 	p.lock = encoded.Bytes()
 	return p, nil
 }
 
 func readLock(dir string) (lock, error) {
-	content, err := ReadText(filepath.Join(dir, LockFile))
+	content, err := project.ReadText(filepath.Join(dir, project.LockFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return lock{}, nil
 	}
 	if err != nil {
-		return lock{}, fmt.Errorf("reading %s: %w", LockFile, err)
+		return lock{}, fmt.Errorf("reading %s: %w", project.LockFile, err)
 	}
 	var read lock
 	if err := yaml.Unmarshal(content, &read); err != nil {
-		return lock{}, fmt.Errorf("reading %s: %w", LockFile, err)
+		return lock{}, fmt.Errorf("reading %s: %w", project.LockFile, err)
 	}
 	// wf removes the files the lock lists, so a path wf could not have generated is refused rather
 	// than trusted.
 	for path := range read.Files {
 		if !generatable(path) {
-			return lock{}, fmt.Errorf("reading %s: %q is not a file wf generates", LockFile, path)
+			return lock{}, fmt.Errorf("reading %s: %q is not a file wf generates", project.LockFile, path)
 		}
 	}
 	return read, nil

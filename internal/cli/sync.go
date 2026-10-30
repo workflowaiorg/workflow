@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/workflowaiorg/workflow/internal/base"
+	"github.com/workflowaiorg/workflow/internal/project"
 	"github.com/workflowaiorg/workflow/internal/render"
 )
 
@@ -23,23 +24,24 @@ func runSync(app *App, args []string) error {
 		return fmt.Errorf("%w: --check writes nothing, so it takes no --force", errUsage)
 	}
 
-	if err := base.Validate(app.dir); err != nil {
+	config, err := project.Load(app.dir)
+	if err != nil {
 		return err
 	}
 	if *check {
-		return app.check()
+		return app.check(config)
 	}
-	report, err := render.Sync(app.dir, app.version, *force)
+	report, err := render.Sync(app.dir, config, app.version, *force)
 	return app.reportSync(report, err)
 }
 
 // check compares the generated files, and .agents/base, with what this version of wf writes.
-func (app *App) check() error {
-	differences, err := render.Check(app.dir, app.version)
+func (app *App) check(config project.Config) error {
+	differences, err := render.Check(app.dir, config, app.version)
 	if err != nil {
 		return err
 	}
-	baseDifferences, err := base.Check(app.dir, app.version)
+	baseDifferences, err := base.Check(app.dir, config, app.version)
 	if err != nil {
 		return err
 	}
@@ -106,10 +108,11 @@ func runShow(app *App, args []string) error {
 		return fmt.Errorf("%w: names one skill", errUsage)
 	}
 
-	if err := base.Validate(app.dir); err != nil {
+	config, err := project.Load(app.dir)
+	if err != nil {
 		return err
 	}
-	content, err := render.Skill(app.dir, app.version, names[0], *baseOnly)
+	content, err := render.Skill(app.dir, config, app.version, names[0], *baseOnly)
 	if err != nil {
 		return err
 	}

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/workflowaiorg/workflow/internal/base"
+	"github.com/workflowaiorg/workflow/internal/project"
 )
 
 func TestFilesRefusesAForgeItHasNoBaseFor(t *testing.T) {
@@ -23,7 +24,7 @@ func TestTheWorkflowSkillNamesNoForgeCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Everything forge-specific lives in the forge's own skill, so the workflow holds on any forge.
-	for _, name := range []string{"skills/workflow/SKILL.md", "skills/domain-specs/SKILL.md", "GUIDE.md"} {
+	for _, name := range []string{"skills/workflow/SKILL.md", "skills/domain-specs/SKILL.md", "workflow/GUIDE.md"} {
 		for _, word := range []*regexp.Regexp{regexp.MustCompile(`\bglab\b`), regexp.MustCompile(`\bgh\b`), regexp.MustCompile(`\w::\w`)} {
 			if found := word.FindString(string(files[name])); found != "" {
 				t.Errorf("%s names %q, which belongs to a forge skill", name, found)
@@ -35,8 +36,8 @@ func TestTheWorkflowSkillNamesNoForgeCommand(t *testing.T) {
 	}
 }
 
-// project returns a directory holding a project's .wf.yml and the base of its forge.
-func project(t *testing.T, pin string) string {
+// installed returns a directory holding a project's .wf.yml and the base of its forge.
+func installed(t *testing.T, pin string) string {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, ".wf.yml"), []byte("wf: "+pin+"\nforge: gitlab\n"), 0o644); err != nil {
@@ -49,8 +50,8 @@ func project(t *testing.T, pin string) string {
 }
 
 func TestCheckNamesEveryFileThatIsNotTheBase(t *testing.T) {
-	dir := project(t, "1.2.0")
-	if differences, err := base.Check(dir, "1.2.0"); err != nil || len(differences) != 0 {
+	dir := installed(t, "1.2.0")
+	if differences, err := check(t, dir, "1.2.0"); err != nil || len(differences) != 0 {
 		t.Fatalf("Check right after Install = (%v, %v), want no differences", differences, err)
 	}
 
@@ -70,13 +71,13 @@ func TestCheckNamesEveryFileThatIsNotTheBase(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Windows line endings are not a difference.
-	content, err := os.ReadFile(filepath.Join(dir, ".agents/base/GUIDE.md"))
+	content, err := os.ReadFile(filepath.Join(dir, ".agents/base/workflow/GUIDE.md"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	edit("GUIDE.md", strings.ReplaceAll(string(content), "\n", "\r\n"))
+	edit("workflow/GUIDE.md", strings.ReplaceAll(string(content), "\n", "\r\n"))
 
-	differences, err := base.Check(dir, "1.2.0")
+	differences, err := check(t, dir, "1.2.0")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,8 +97,8 @@ func TestCheckNamesEveryFileThatIsNotTheBase(t *testing.T) {
 }
 
 func TestCheckNeedsThePinnedVersion(t *testing.T) {
-	dir := project(t, "1.2.0")
-	differences, err := base.Check(dir, "1.3.0")
+	dir := installed(t, "1.2.0")
+	differences, err := check(t, dir, "1.3.0")
 	if err != nil || len(differences) != 1 || !strings.Contains(differences[0], "pins wf 1.2.0, but this is wf 1.3.0") {
 		t.Errorf("Check by another version = (%q, %v), want one line naming both versions", differences, err)
 	}
@@ -119,4 +120,14 @@ func TestSkeletonLeavesWhatIsThere(t *testing.T) {
 	if content, _ := os.ReadFile(index); string(content) != "the project's own index\n" {
 		t.Errorf("the project's index was overwritten: %q", content)
 	}
+}
+
+// check compares the base of the project at dir, read with its own settings, as version would.
+func check(t *testing.T, dir, version string) ([]string, error) {
+	t.Helper()
+	config, err := project.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return base.Check(dir, config, version)
 }
