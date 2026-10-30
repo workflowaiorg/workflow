@@ -7,19 +7,21 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/workflowaiorg/workflow/internal/base"
+	"github.com/workflowaiorg/workflow/internal/component"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
 func TestFilesRefusesAForgeItHasNoBaseFor(t *testing.T) {
-	if _, err := base.Files("sourcehut"); err == nil || !strings.Contains(err.Error(), "sourcehut") {
+	if _, err := base.Files("sourcehut", nil); err == nil || !strings.Contains(err.Error(), "sourcehut") {
 		t.Errorf("Files(sourcehut) error = %v, want one naming the forge", err)
 	}
 }
 
 func TestTheWorkflowSkillNamesNoForgeCommand(t *testing.T) {
-	files, err := base.Files("gitlab")
+	files, err := base.Files("gitlab", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +45,7 @@ func installed(t *testing.T, pin string) string {
 	if err := os.WriteFile(filepath.Join(dir, ".wf.yml"), []byte("wf: "+pin+"\nforge: gitlab\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := base.Install(dir, "gitlab"); err != nil {
+	if err := base.Install(dir, "gitlab", nil); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -129,5 +131,41 @@ func check(t *testing.T, dir, version string) ([]string, error) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return base.Check(dir, config, version)
+	return base.Check(dir, config, nil, version)
+}
+
+func TestFilesAddsEachComponentsPart(t *testing.T) {
+	core, err := base.Files("gitlab", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	part := func(name string, files map[string]string) component.Component {
+		fsys := fstest.MapFS{}
+		for path, content := range files {
+			fsys[path] = &fstest.MapFile{Data: []byte(content)}
+		}
+		return component.Component{Name: name, Base: fsys}
+	}
+	a := part("a", map[string]string{"AGENTS.md": "## A\n", "workflow/GUIDE.md": "## A's guide\n", "skills/a/SKILL.md": "a"})
+	b := part("b", map[string]string{"AGENTS.md": "## B\n"})
+
+	files, err := base.Files("gitlab", []component.Component{a, b})
+	if err != nil {
+		t.Fatal(err)
+	}
+	trimmed := func(name string) string { return strings.TrimRight(string(core[name]), "\n") }
+	if got, want := string(files["AGENTS.md"]), trimmed("AGENTS.md")+"\n\n## A\n\n## B\n"; got != want {
+		t.Errorf("AGENTS.md ends %q, want wf's, then A's section, then B's", got[max(0, len(got)-40):])
+	}
+	if got, want := string(files["workflow/GUIDE.md"]), trimmed("workflow/GUIDE.md")+"\n\n## A's guide\n"; got != want {
+		t.Errorf("workflow/GUIDE.md does not end with A's section")
+	}
+	if string(files["skills/a/SKILL.md"]) != "a" {
+		t.Error("A's own skill is not in the base")
+	}
+
+	clash := part("clash", map[string]string{"skills/a/SKILL.md": "mine"})
+	if _, err := base.Files("gitlab", []component.Component{a, clash}); err == nil || !strings.Contains(err.Error(), "skills/a/SKILL.md") {
+		t.Errorf("Files with two components owning one file = %v, want an error naming it", err)
+	}
 }

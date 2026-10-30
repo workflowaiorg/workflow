@@ -7,9 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -50,8 +52,20 @@ type Config struct {
 	Forge string
 	// Worktree is what wf worktree copies into a new worktree.
 	Worktree Worktree
+	// Gate holds the project's own steps for /pre-mr-check.
+	Gate []GateStep
+	// Components holds the components wf add installed, by name, each with the answers it was
+	// given, by option.
+	Components map[string]map[string]any
 	// Values is the whole of .wf.yml as written: the data wf's base files are rendered with.
 	Values map[string]any
+}
+
+// GateStep is one step of /pre-mr-check's gate: the command run when a changed path matches.
+type GateStep struct {
+	Name  string
+	Paths []string
+	Run   string
 }
 
 // Worktree holds the gitignored files a new worktree needs.
@@ -101,7 +115,12 @@ func Load(dir string) (Config, error) {
 	default:
 		config.Forge = named.Forge
 	}
-	problems = append(problems, gateProblems(values["gate"])...)
+	gate, gateProblems := readGate(values["gate"])
+	config.Gate = gate
+	problems = append(problems, gateProblems...)
+	components, componentProblems := readComponents(values["components"])
+	config.Components = components
+	problems = append(problems, componentProblems...)
 	worktree, worktreeProblems := readWorktree(values["worktree"])
 	config.Worktree = worktree
 	problems = append(problems, worktreeProblems...)
@@ -111,16 +130,17 @@ func Load(dir string) (Config, error) {
 	return config, nil
 }
 
-// gateProblems says what is wrong with gate:, the project's own steps for /pre-mr-check: a list
-// of entries, each with a name, a list of paths and the command to run.
-func gateProblems(gate any) []string {
-	if gate == nil {
-		return nil
+// readGate reads gate:, the project's own steps for /pre-mr-check, saying what is wrong with it:
+// a list of entries, each with a name, a list of paths and the command to run.
+func readGate(value any) ([]GateStep, []string) {
+	if value == nil {
+		return nil, nil
 	}
-	steps, ok := gate.([]any)
+	steps, ok := value.([]any)
 	if !ok {
-		return []string{"gate: is a list of steps, each with name:, paths: and run:"}
+		return nil, []string{"gate: is a list of steps, each with name:, paths: and run:"}
 	}
+	var gate []GateStep
 	var problems []string
 	for i, step := range steps {
 		fields, _ := step.(map[string]any)
@@ -133,17 +153,47 @@ func gateProblems(gate any) []string {
 		if name == "" {
 			missing = append(missing, "name: the step's name")
 		}
-		if paths, ok := stringList(fields["paths"]); !ok || len(paths) == 0 {
+		paths, ok := stringList(fields["paths"])
+		if !ok || len(paths) == 0 {
 			missing = append(missing, `paths: a list of globs, such as ["**/*.go"]`)
 		}
-		if run, _ := fields["run"].(string); run == "" {
+		run, _ := fields["run"].(string)
+		if run == "" {
 			missing = append(missing, "run: the command")
 		}
 		if len(missing) > 0 {
 			problems = append(problems, where+" needs "+strings.Join(missing, ", "))
+			continue
+		}
+		gate = append(gate, GateStep{Name: name, Paths: paths, Run: run})
+	}
+	return gate, problems
+}
+
+// readComponents reads components:, which wf add writes: each component's name, holding its
+// answers by option. Whether wf knows each name is for the caller, which knows the components.
+func readComponents(value any) (map[string]map[string]any, []string) {
+	if value == nil {
+		return nil, nil
+	}
+	entries, ok := value.(map[string]any)
+	if !ok {
+		return nil, []string{"components: holds each installed component's name, with its answers under it"}
+	}
+	components := map[string]map[string]any{}
+	var problems []string
+	for name, answers := range entries {
+		switch answers := answers.(type) {
+		case nil:
+			components[name] = map[string]any{}
+		case map[string]any:
+			components[name] = answers
+		default:
+			problems = append(problems, fmt.Sprintf("components.%s holds the component's answers, each as option: answer", name))
 		}
 	}
-	return problems
+	slices.Sort(problems)
+	return components, problems
 }
 
 // readWorktree reads worktree:, saying what is wrong with it.
@@ -195,6 +245,92 @@ func stringList(value any) ([]string, bool) {
 		list = append(list, text)
 	}
 	return list, true
+}
+
+// WithComponent returns the .wf.yml of the project at dir with the component name recorded as
+// installed with answers, and writes nothing: wf add checks the edit before it writes anything else,
+// and writes .wf.yml last. The developer's settings and comments stay; blank lines between keys and
+// their own indentation do not, as the file is written back whole.
+func WithComponent(dir, name string, answers map[string]any) ([]byte, error) {
+	before, err := Load(dir)
+	if err != nil {
+		return nil, err
+	}
+	content, err := ReadText(filepath.Join(dir, ConfigFile))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", ConfigFile, err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return nil, UserErrorf("reading %s: %v", ConfigFile, err)
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, UserErrorf("%s holds no settings", ConfigFile)
+	}
+	root := doc.Content[0]
+
+	var entry yaml.Node
+	if err := entry.Encode(answers); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", ConfigFile, err)
+	}
+	components := mappingValue(root, "components")
+	switch {
+	case components == nil:
+		components = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		root.Content = append(root.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: "components"}, components)
+	case components.Kind == yaml.ScalarNode:
+		// components: left empty.
+		*components = yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	}
+	if components.Kind != yaml.MappingNode {
+		return nil, notInFull()
+	}
+	if existing := mappingValue(components, name); existing != nil {
+		*existing = entry
+	} else {
+		components.Content = append(components.Content, &yaml.Node{Kind: yaml.ScalarNode, Value: name}, &entry)
+	}
+
+	var out bytes.Buffer
+	encoder := yaml.NewEncoder(&out)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(&doc); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", ConfigFile, err)
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", ConfigFile, err)
+	}
+
+	// An alias or a merge key can hand components: down from elsewhere in the file, where the edit
+	// above would replace it rather than add to it: what was installed must still be there.
+	var after map[string]any
+	if err := yaml.Unmarshal(out.Bytes(), &after); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", ConfigFile, err)
+	}
+	recorded, problems := readComponents(after["components"])
+	want := maps.Clone(before.Components)
+	if want == nil {
+		want = map[string]map[string]any{}
+	}
+	want[name] = answers
+	if len(problems) > 0 || !reflect.DeepEqual(recorded, want) {
+		return nil, notInFull()
+	}
+	return out.Bytes(), nil
+}
+
+func notInFull() error {
+	return UserErrorf("%s: wf add can only add to components: written out in full; replace its alias or merge key (<<:) with the components themselves", ConfigFile)
+}
+
+// mappingValue returns the value under key in mapping, or nil when it has none.
+func mappingValue(mapping *yaml.Node, key string) *yaml.Node {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			return mapping.Content[i+1]
+		}
+	}
+	return nil
 }
 
 // ReadText reads a text file as wf compares and renders it: Windows line endings become \n and a

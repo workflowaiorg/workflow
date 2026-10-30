@@ -16,6 +16,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/workflowaiorg/workflow/internal/component"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -51,15 +52,18 @@ type App struct {
 	stdout      io.Writer
 	stderr      io.Writer
 	commands    []Command
-	now         func() time.Time
+	// components are the components wf add offers.
+	components []component.Component
+	now        func() time.Time
 }
 
 // New returns wf's command line, reporting version, working on the project at dir, reading answers
 // from stdin and writing to stdout and stderr. wf asks a question only when stdin is a terminal.
 func New(version, dir string, stdin io.Reader, stdout, stderr io.Writer) *App {
-	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, now: time.Now}
+	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, components: component.All, now: time.Now}
 	app.commands = []Command{
 		{Name: "init", Usage: "wf init [--forge <forge>]", Summary: "Start using wf in this project: .wf.yml, the base, and every assistant's files", run: runInit},
+		{Name: "add", Usage: "wf add [<component>] [--<option> …] [--force]", Summary: "Add a component to the project; with no component, list them", run: runAdd},
 		{Name: "sync", Usage: "wf sync [--check | --force]", Summary: "Write every assistant's files from .agents; --check only compares", run: runSync},
 		{Name: "show", Usage: "wf show <skill> [--base]", Summary: "Print a skill as an assistant reads it; --base for wf's part alone", run: runShow},
 		{Name: "worktree", Usage: "wf worktree <issue> <slug> | wf worktree plan <slug>", Summary: "Give an Issue or a plan its own worktree, or find it; prints its path last", run: runWorktree},
@@ -80,13 +84,15 @@ func (app *App) Run(args []string) int {
 		name = "help"
 	}
 
-	index := slices.IndexFunc(app.commands, func(command Command) bool { return command.Name == name })
-	if index < 0 {
+	run := func(app *App, args []string) error { return app.runComponent(name, args) }
+	if index := slices.IndexFunc(app.commands, func(command Command) bool { return command.Name == name }); index >= 0 {
+		run = app.commands[index].run
+	} else if !slices.ContainsFunc(app.components, func(c component.Component) bool { return c.Name == name }) {
 		fmt.Fprintf(app.stderr, "wf: unknown command %q; run wf help\n", name)
 		return exitUsage
 	}
 
-	if err := app.commands[index].run(app, rest); err != nil {
+	if err := run(app, rest); err != nil {
 		if errors.Is(err, errHelpShown) {
 			return exitOK
 		}
@@ -165,10 +171,43 @@ func runHelp(app *App, args []string) error {
 func (app *App) writeHelp() error {
 	fmt.Fprintf(app.stdout, "wf %s — an AI-assisted engineering workflow for Go projects\n\nCommands:\n", app.version)
 	table := tabwriter.NewWriter(app.stdout, 0, 0, 3, ' ', 0)
-	for _, command := range app.commands {
+	for _, command := range app.allCommands() {
 		fmt.Fprintf(table, "  %s\t%s\n", command.Usage, command.Summary)
 	}
 	return table.Flush()
+}
+
+// allCommands returns wf's own commands, then those of the components the project in app.dir has
+// installed. A project whose settings cannot be read lists wf's own alone: help still helps there.
+func (app *App) allCommands() []Command {
+	commands := slices.Clone(app.commands)
+	config, err := project.Load(app.dir)
+	if err != nil {
+		return commands
+	}
+	installed, err := component.Installed(config, app.components)
+	if err != nil {
+		return commands
+	}
+	for _, c := range installed {
+		for _, command := range c.Commands {
+			commands = append(commands, Command{Name: c.Name + " " + command.Name, Usage: command.Usage, Summary: command.Summary})
+		}
+	}
+	return commands
+}
+
+// load reads the settings of the project in app.dir, and the components they install.
+func (app *App) load() (project.Config, []component.Component, error) {
+	config, err := project.Load(app.dir)
+	if err != nil {
+		return project.Config{}, nil, err
+	}
+	installed, err := component.Installed(config, app.components)
+	if err != nil {
+		return project.Config{}, nil, err
+	}
+	return config, installed, nil
 }
 
 // helpJSON is what wf help --json prints: the contract agents read, so its shape only grows.
@@ -180,7 +219,7 @@ type helpJSON struct {
 func (app *App) writeHelpJSON() error {
 	encoder := json.NewEncoder(app.stdout)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(helpJSON{Version: app.version, Commands: app.commands}); err != nil {
+	if err := encoder.Encode(helpJSON{Version: app.version, Commands: app.allCommands()}); err != nil {
 		return fmt.Errorf("encoding the command list: %w", err)
 	}
 	return nil

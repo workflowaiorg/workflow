@@ -58,7 +58,7 @@ func runInit(app *App, args []string) error {
 		return fmt.Errorf("%w: wf works with %s for now, not %q", errUsage, strings.Join(project.Forges, ", "), *forge)
 	}
 
-	if err := base.Install(app.dir, *forge); err != nil {
+	if err := base.Install(app.dir, *forge, nil); err != nil {
 		return err
 	}
 	written, err := base.Skeleton(app.dir)
@@ -79,6 +79,6 @@ func runInit(app *App, args []string) error {
 	if err != nil {
 		return err
 	}
-	report, err := render.Sync(app.dir, config, app.version, false)
+	report, err := render.Sync(app.dir, config, nil, app.version, false)
 	return app.reportSync(report, err)
 }

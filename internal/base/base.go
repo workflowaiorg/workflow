@@ -1,9 +1,10 @@
-// Package base is what wf carries for every project: the base it installs into .agents/base, the
-// files it gives a new project once, and the check that a project's .agents/base is still the base
-// of the version it pins.
+// Package base is what wf carries for every project: the base it installs into .agents/base,
+// assembled with the parts of the project's components, the files it gives a project once, and the
+// check that a project's .agents/base is still the base of the version it pins.
 package base
 
 import (
+	"bytes"
 	"embed"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/workflowaiorg/workflow/internal/component"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -23,24 +25,49 @@ import (
 //go:embed all:files
 var files embed.FS
 
-// Files returns the base of a project on forge, by its slash-separated path under .agents/base.
-func Files(forge string) (map[string][]byte, error) {
+// sections are the files a component adds to as a section of its own, rather than owning alone.
+var sections = []string{"AGENTS.md", "workflow/GUIDE.md"}
+
+// Files returns the base of a project on forge with components installed, by its slash-separated
+// path under .agents/base: wf's core, the forge's part, then each component's.
+func Files(forge string, components []component.Component) (map[string][]byte, error) {
 	if !slices.Contains(project.Forges, forge) {
 		return nil, fmt.Errorf("wf has no base for the forge %q; it knows %s", forge, strings.Join(project.Forges, ", "))
 	}
 	base := map[string][]byte{}
 	for _, root := range []string{"files/core", "files/forge-" + forge} {
-		if err := read(root, base); err != nil {
+		if err := read(files, root, base); err != nil {
 			return nil, err
+		}
+	}
+	for _, c := range components {
+		if c.Base == nil {
+			continue
+		}
+		part := map[string][]byte{}
+		if err := read(c.Base, ".", part); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", c, err)
+		}
+		for _, name := range slices.Sorted(maps.Keys(part)) {
+			existing, taken := base[name]
+			switch {
+			case slices.Contains(sections, name) && taken:
+				base[name] = slices.Concat(bytes.TrimRight(existing, "\n"), []byte("\n\n"), part[name])
+			case taken:
+				// Two sources of one file would leave one of them silently unused.
+				return nil, fmt.Errorf("%s and another part of the base both have %s", c, name)
+			default:
+				base[name] = part[name]
+			}
 		}
 	}
 	return base, nil
 }
 
-// Install writes the base of a project on forge into dir's .agents/base, replacing whatever was
-// there: .agents/base is wf's alone.
-func Install(dir, forge string) error {
-	base, err := Files(forge)
+// Install writes the base of a project on forge with components installed into dir's
+// .agents/base, replacing whatever was there: .agents/base is wf's alone.
+func Install(dir, forge string, components []component.Component) error {
+	base, err := Files(forge, components)
 	if err != nil {
 		return err
 	}
@@ -59,8 +86,21 @@ func Install(dir, forge string) error {
 // Skeleton writes into dir each file a new project starts with that is not there yet, and returns
 // the paths it wrote. They are the project's from then on, and wf never writes them again.
 func Skeleton(dir string) ([]string, error) {
+	return writeOnce(dir, files, "files/skeleton")
+}
+
+// ComponentSkeleton writes into dir each file c gives a project that is not there yet, and
+// returns the paths it wrote. Like the project's own skeleton, they are the project's from then on.
+func ComponentSkeleton(dir string, c component.Component) ([]string, error) {
+	if c.Skeleton == nil {
+		return nil, nil
+	}
+	return writeOnce(dir, c.Skeleton, ".")
+}
+
+func writeOnce(dir string, fsys fs.FS, root string) ([]string, error) {
 	skeleton := map[string][]byte{}
-	if err := read("files/skeleton", skeleton); err != nil {
+	if err := read(fsys, root, skeleton); err != nil {
 		return nil, err
 	}
 	var written []string
@@ -80,13 +120,14 @@ func Skeleton(dir string) ([]string, error) {
 }
 
 // Check compares dir's .agents/base with the base this version of wf carries for the project's
-// forge, and writes nothing. It returns one line per file that differs; none means it is the same.
-func Check(dir string, config project.Config, version string) ([]string, error) {
+// forge and its components, and writes nothing. It returns one line per file that differs; none
+// means it is the same.
+func Check(dir string, config project.Config, components []component.Component, version string) ([]string, error) {
 	if config.WF != version {
 		// Only the pinned version carries the base to compare with.
 		return []string{fmt.Sprintf("%s: pins wf %s, but this is wf %s; run the version it pins", project.ConfigFile, config.WF, version)}, nil
 	}
-	want, err := Files(config.Forge)
+	want, err := Files(config.Forge, components)
 	if err != nil {
 		return nil, err
 	}
@@ -139,17 +180,20 @@ func Check(dir string, config project.Config, version string) ([]string, error) 
 	return differences, nil
 }
 
-// read adds every file under root in the embedded files to into, by its path under root.
-func read(root string, into map[string][]byte) error {
-	return fs.WalkDir(files, root, func(name string, entry fs.DirEntry, err error) error {
+// read adds every file under root in fsys to into, by its path under root.
+func read(fsys fs.FS, root string, into map[string][]byte) error {
+	return fs.WalkDir(fsys, root, func(name string, entry fs.DirEntry, err error) error {
 		if err != nil || entry.IsDir() {
 			return err
 		}
-		content, err := files.ReadFile(name)
+		content, err := fs.ReadFile(fsys, name)
 		if err != nil {
 			return err
 		}
-		into[strings.TrimPrefix(name, root+"/")] = content
+		if root != "." {
+			name = strings.TrimPrefix(name, root+"/")
+		}
+		into[name] = content
 		return nil
 	})
 }

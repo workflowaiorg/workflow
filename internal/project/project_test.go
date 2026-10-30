@@ -58,3 +58,71 @@ func TestLoadWithNoSettings(t *testing.T) {
 		t.Errorf("Load with no %s = %v, want a UserError that is fs.ErrNotExist", project.ConfigFile, err)
 	}
 }
+
+func TestWithComponentKeepsWhatIsThere(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, project.ConfigFile)
+	original := "# settings\nwf: 1.2.0\nforge: gitlab # the forge\ncomponents:\n"
+	if err := os.WriteFile(file, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	addComponent(t, dir, "backend", map[string]any{"grpc": true})
+	addComponent(t, dir, "frontend", map[string]any{})
+	content, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# settings\n", "forge: gitlab # the forge\n", "  backend:\n    grpc: true\n", "  frontend: {}\n"} {
+		if !strings.Contains(string(content), want) {
+			t.Errorf(".wf.yml after WithComponent lacks %q:\n%s", want, content)
+		}
+	}
+	config, err := project.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Components["backend"]["grpc"] != true || config.Components["frontend"] == nil {
+		t.Errorf("Load after WithComponent = %v, want both components", config.Components)
+	}
+}
+
+func TestWithComponentRefusesComponentsItCannotAddTo(t *testing.T) {
+	for name, original := range map[string]string{
+		"alias":     "wf: 1.2.0\nforge: gitlab\nsaved: &installed\n  first: {}\ncomponents: *installed\n",
+		"merge key": "wf: 1.2.0\nforge: gitlab\nsaved: &settings\n  components:\n    first: {}\n<<: *settings\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, project.ConfigFile), []byte(original), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if config, err := project.Load(dir); err != nil || config.Components["first"] == nil {
+				t.Fatalf("Load = (%v, %v), want first installed", config.Components, err)
+			}
+			_, err := project.WithComponent(dir, "second", map[string]any{})
+			if userErr := (*project.UserError)(nil); !errors.As(err, &userErr) || !strings.Contains(err.Error(), "written out in full") {
+				t.Errorf("WithComponent = %v, want a UserError asking for components: in full", err)
+			}
+		})
+	}
+}
+
+// addComponent records name in dir's .wf.yml, as wf add does.
+func addComponent(t *testing.T, dir, name string, answers map[string]any) {
+	t.Helper()
+	content, err := project.WithComponent(dir, name, answers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, project.ConfigFile), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestLoadRefusesComponentsThatAreNotAMapping(t *testing.T) {
+	for _, components := range []string{"components: [backend]\n", "components:\n  backend: yes\n"} {
+		if _, err := load(t, "wf: 1.2.0\nforge: gitlab\n"+components); err == nil || !strings.Contains(err.Error(), "components") {
+			t.Errorf("Load with %q = %v, want an error naming components", components, err)
+		}
+	}
+}

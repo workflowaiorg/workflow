@@ -67,7 +67,7 @@ func TestHelpJSONListsEveryCommand(t *testing.T) {
 		}
 		names = append(names, command.Name)
 	}
-	want := []string{"init", "sync", "show", "worktree", "spec-coverage", "version", "help"}
+	want := []string{"init", "add", "sync", "show", "worktree", "spec-coverage", "version", "help"}
 	if !slices.Equal(names, want) {
 		t.Errorf("commands = %v, want %v", names, want)
 	}
@@ -78,7 +78,7 @@ func TestHelpListsEveryCommand(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("wf help = (%d, stderr %q), want (0, \"\")", code, stderr)
 	}
-	for _, usage := range []string{"wf init [--forge <forge>]", "wf sync [--check | --force]", "wf show <skill> [--base]", "wf worktree <issue> <slug>", "wf spec-coverage [--report-only]", "wf version", "wf help [--json]"} {
+	for _, usage := range []string{"wf init [--forge <forge>]", "wf add [<component>]", "wf sync [--check | --force]", "wf show <skill> [--base]", "wf worktree <issue> <slug>", "wf spec-coverage [--report-only]", "wf version", "wf help [--json]"} {
 		if !strings.Contains(stdout, usage) {
 			t.Errorf("wf help does not list %q:\n%s", usage, stdout)
 		}
@@ -182,7 +182,7 @@ func TestSyncLeavesFilesItDidNotWriteUntilForced(t *testing.T) {
 }
 
 func TestCommandHelp(t *testing.T) {
-	for _, name := range []string{"init", "sync", "show", "worktree", "spec-coverage"} {
+	for _, name := range []string{"init", "add", "sync", "show", "worktree", "spec-coverage"} {
 		code, stdout, stderr := run(t, name, "-h")
 		if code != 0 || !strings.HasPrefix(stdout, "usage: wf "+name) || stderr != "" {
 			t.Errorf("wf %s -h = (%d, %q, %q), want exit 0 and its usage line", name, code, stdout, stderr)

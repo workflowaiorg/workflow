@@ -32,8 +32,8 @@ even after one fails**, so one report shows every problem.
 |---|---|---|
 | generated files | `.wf.yml`, `.agents/**`, or any file wf generates | `wf sync --check` |
 | specs and records | `.workflow/specs/**`, `.workflow/decisions/**`, `.workflow/plans/**` | `wf spec-coverage` |
-[[- range (index . "gate") ]]
-| [[ .name ]] | [[ range $i, $path := .paths ]][[ if $i ]], [[ end ]]`[[ $path ]]`[[ end ]] | `[[ .run ]]` |
+[[- range gate ]]
+| [[ .Name ]] | [[ range $i, $path := .Paths ]][[ if $i ]], [[ end ]]`[[ $path ]]`[[ end ]] | `[[ .Run ]]` |
 [[- end ]]
 
 What the paths decide is which steps are ⚪, never whether a part of the project gets checked at
