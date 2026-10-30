@@ -533,6 +533,12 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 			want:    `its folder is "naming"`,
 		},
 		{
+			name:    "a project part for a template",
+			path:    ".agents/project/SPEC-TEMPLATE.md",
+			content: "Pinned elsewhere: the manifest.\n",
+			want:    "a template takes no project part",
+		},
+		{
 			name:    "frontmatter never closed",
 			path:    ".agents/base/commands/review.md",
 			content: "---\ndescription: Reviews.\n",

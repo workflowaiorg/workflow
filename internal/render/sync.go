@@ -86,7 +86,7 @@ func Sync(dir, version string, force bool) (Report, error) {
 		removeEmptyParents(dir, filepath.Dir(full))
 	}
 
-	if current, err := readText(filepath.Join(dir, LockFile)); err != nil || !bytes.Equal(current, p.lock) {
+	if current, err := ReadText(filepath.Join(dir, LockFile)); err != nil || !bytes.Equal(current, p.lock) {
 		if err := writeFile(dir, LockFile, p.lock); err != nil {
 			return report, err
 		}
@@ -121,7 +121,7 @@ func Check(dir, version string) ([]string, error) {
 	for _, kept := range p.kept {
 		differences = append(differences, kept+": no longer generated, but edited by hand; remove it yourself")
 	}
-	current, err := readText(filepath.Join(dir, LockFile))
+	current, err := ReadText(filepath.Join(dir, LockFile))
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		differences = append(differences, LockFile+": missing")
@@ -160,7 +160,7 @@ func newPlan(dir, version string, force bool) (plan, error) {
 	}
 
 	read := func(path string) error {
-		content, err := readText(filepath.Join(dir, filepath.FromSlash(path)))
+		content, err := ReadText(filepath.Join(dir, filepath.FromSlash(path)))
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
@@ -221,7 +221,7 @@ func newPlan(dir, version string, force bool) (plan, error) {
 }
 
 func readLock(dir string) (lock, error) {
-	content, err := readText(filepath.Join(dir, LockFile))
+	content, err := ReadText(filepath.Join(dir, LockFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return lock{}, nil
 	}

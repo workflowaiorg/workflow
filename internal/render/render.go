@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"text/template"
@@ -31,6 +32,9 @@ type NotFoundError struct{ message string }
 
 func (err *NotFoundError) Error() string { return err.message }
 
+// NotFound returns a NotFoundError saying message.
+func NotFound(message string) error { return &NotFoundError{message} }
+
 // File is one generated file: its slash-separated path from the project root, and its content.
 type File struct {
 	Path string
@@ -41,7 +45,8 @@ type kind int
 
 const (
 	instructions kind = iota
-	guide
+	// workflowFile is a file of .workflow/: the guide and the templates specs and records start from.
+	workflowFile
 	skill
 	command
 	subagent
@@ -131,6 +136,11 @@ func load(dir string) ([]source, error) {
 			if !ok {
 				return fmt.Errorf("%s: wf does not know this file; see the layout in wf's README", where)
 			}
+			// A template is copied whole into each new spec or record, so a project part added under
+			// it would land in every one of them.
+			if part == ProjectDir && k == workflowFile && name != "GUIDE" {
+				return &NotFoundError{fmt.Sprintf("%s: a template takes no project part; say what the project needs in %s/skills/domain-specs/SKILL.md", where, ProjectDir)}
+			}
 			if part == BaseDir {
 				if content, err = renderTemplate(where, content, data); err != nil {
 					return err
@@ -155,14 +165,18 @@ func load(dir string) ([]source, error) {
 	return sources, nil
 }
 
+// workflowFiles are the files at the top of .agents/base and .agents/project that become
+// .workflow/<name>.
+var workflowFiles = []string{"GUIDE.md", "SPEC-TEMPLATE.md", "DECISION-TEMPLATE.md"}
+
 // classify says what a file under .agents/base or .agents/project is, from its path there.
 func classify(rel string) (k kind, name string, ok bool) {
 	parts := strings.Split(rel, "/")
 	switch {
 	case rel == "AGENTS.md":
 		return instructions, "AGENTS", true
-	case rel == "GUIDE.md":
-		return guide, "GUIDE", true
+	case slices.Contains(workflowFiles, rel):
+		return workflowFile, strings.TrimSuffix(rel, ".md"), true
 	case len(parts) == 3 && parts[0] == "skills" && parts[2] == "SKILL.md":
 		return skill, parts[1], true
 	case len(parts) == 2 && parts[0] == "commands" && path.Ext(parts[1]) == ".md":
@@ -193,7 +207,7 @@ func walk(root string, visit func(rel string, content []byte) error) error {
 		if err != nil {
 			return err
 		}
-		content, err := readText(full)
+		content, err := ReadText(full)
 		if err != nil {
 			return err
 		}
@@ -205,17 +219,17 @@ func walk(root string, visit func(rel string, content []byte) error) error {
 	return err
 }
 
-// readText reads a text file as wf compares and renders it: Windows line endings become \n and a
+// ReadText reads a text file as wf compares and renders it: Windows line endings become \n and a
 // byte order mark is dropped, so a checkout with core.autocrlf, or a file saved by a Windows
 // editor, reads the same as any other.
-func readText(file string) ([]byte, error) {
+func ReadText(file string) ([]byte, error) {
 	content, err := os.ReadFile(file)
 	content = bytes.TrimPrefix(content, []byte("\xef\xbb\xbf"))
 	return bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n")), err
 }
 
 func readConfig(dir string) (map[string]any, error) {
-	content, err := readText(filepath.Join(dir, ConfigFile))
+	content, err := ReadText(filepath.Join(dir, ConfigFile))
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, &NotFoundError{fmt.Sprintf("no %s in %s: run wf in the project's root", ConfigFile, dir)}
 	}
@@ -238,7 +252,14 @@ func renderTemplate(name string, content []byte, data map[string]any) ([]byte, e
 	}
 	var out bytes.Buffer
 	if err := tmpl.Execute(&out, data); err != nil {
+		// A key the base uses and .wf.yml lacks is the project's to add, not a fault in wf.
+		if match := missingKey.FindStringSubmatch(err.Error()); match != nil && strings.HasPrefix(name, BaseDir+"/") {
+			return nil, &NotFoundError{fmt.Sprintf("%s uses %s, which %s does not set; add %s: to it", name, match[1], ConfigFile, match[1])}
+		}
 		return nil, fmt.Errorf("rendering template: %w", err)
 	}
 	return out.Bytes(), nil
 }
+
+// missingKey finds the key in text/template's error for a map with no entry for it.
+var missingKey = regexp.MustCompile(`map has no entry for key "([^"]+)"`)

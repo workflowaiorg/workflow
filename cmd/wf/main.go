@@ -18,5 +18,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "wf: finding the current directory: %v\n", err)
 		os.Exit(1)
 	}
-	os.Exit(cli.New(cli.ResolveVersion(version), dir, os.Stdout, os.Stderr).Run(os.Args[1:]))
+	os.Exit(cli.New(cli.ResolveVersion(version), dir, os.Stdin, os.Stdout, os.Stderr).Run(os.Args[1:]))
 }
