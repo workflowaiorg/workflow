@@ -22,6 +22,7 @@ import (
 const (
 	ConfigFile = ".wf.yml"
 	LockFile   = ".wf.lock"
+	SumFile    = ".wf.sum"
 	BaseDir    = ".agents/base"
 	ProjectDir = ".agents/project"
 )

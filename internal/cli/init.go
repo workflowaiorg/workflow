@@ -80,5 +80,10 @@ func runInit(app *App, args []string) error {
 		return err
 	}
 	report, err := render.Sync(app.dir, config, nil, app.version, false)
-	return app.reportSync(report, err)
+	if err := app.reportSync(report, err); err != nil {
+		return err
+	}
+	// Offline on purpose: recording what the release must look like is its own, deliberate step.
+	fmt.Fprintf(app.stdout, "Next: run wf lock to record wf %s's fingerprints in %s, then commit everything.\n", app.version, project.SumFile)
+	return nil
 }

@@ -67,7 +67,7 @@ func TestHelpJSONListsEveryCommand(t *testing.T) {
 		}
 		names = append(names, command.Name)
 	}
-	want := []string{"init", "add", "sync", "show", "worktree", "spec-coverage", "version", "help"}
+	want := []string{"init", "add", "lock", "sync", "show", "worktree", "spec-coverage", "version", "help"}
 	if !slices.Equal(names, want) {
 		t.Errorf("commands = %v, want %v", names, want)
 	}
@@ -78,7 +78,7 @@ func TestHelpListsEveryCommand(t *testing.T) {
 	if code != 0 || stderr != "" {
 		t.Fatalf("wf help = (%d, stderr %q), want (0, \"\")", code, stderr)
 	}
-	for _, usage := range []string{"wf init [--forge <forge>]", "wf add [<component>]", "wf sync [--check | --force]", "wf show <skill> [--base]", "wf worktree <issue> <slug>", "wf spec-coverage [--report-only]", "wf version", "wf help [--json]"} {
+	for _, usage := range []string{"wf init [--forge <forge>]", "wf add [<component>]", "wf lock", "wf sync [--check | --force]", "wf show <skill> [--base]", "wf worktree <issue> <slug>", "wf spec-coverage [--report-only]", "wf version", "wf help [--json]"} {
 		if !strings.Contains(stdout, usage) {
 			t.Errorf("wf help does not list %q:\n%s", usage, stdout)
 		}
@@ -182,7 +182,7 @@ func TestSyncLeavesFilesItDidNotWriteUntilForced(t *testing.T) {
 }
 
 func TestCommandHelp(t *testing.T) {
-	for _, name := range []string{"init", "add", "sync", "show", "worktree", "spec-coverage"} {
+	for _, name := range []string{"init", "add", "lock", "sync", "show", "worktree", "spec-coverage"} {
 		code, stdout, stderr := run(t, name, "-h")
 		if code != 0 || !strings.HasPrefix(stdout, "usage: wf "+name) || stderr != "" {
 			t.Errorf("wf %s -h = (%d, %q, %q), want exit 0 and its usage line", name, code, stdout, stderr)
@@ -211,8 +211,8 @@ func TestShow(t *testing.T) {
 
 func TestInitThenCheckPasses(t *testing.T) {
 	dir := t.TempDir()
-	if code, stdout, stderr := runIn(t, dir, "init", "--forge=gitlab"); code != 0 || !strings.Contains(stdout, "wrote    .claude/skills/workflow/SKILL.md") {
-		t.Fatalf("wf init --forge=gitlab = (%d, %q, %q), want exit 0 and the skills written", code, stdout, stderr)
+	if code, stdout, stderr := runIn(t, dir, "init", "--forge=gitlab"); code != 0 || !strings.Contains(stdout, "wrote    .claude/skills/workflow/SKILL.md") || !strings.HasSuffix(stdout, "Next: run wf lock to record wf 0.1.0's fingerprints in .wf.sum, then commit everything.\n") {
+		t.Fatalf("wf init --forge=gitlab = (%d, %q, %q), want exit 0, the skills written and wf lock named as the next step", code, stdout, stderr)
 	}
 	if code, _, stderr := runIn(t, dir, "sync", "--check"); code != 0 {
 		t.Fatalf("wf sync --check right after wf init exited %d: %s", code, stderr)

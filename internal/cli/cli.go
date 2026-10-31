@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/workflowaiorg/workflow/internal/component"
+	"github.com/workflowaiorg/workflow/internal/launcher"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -55,15 +56,18 @@ type App struct {
 	// components are the components wf add offers.
 	components []component.Component
 	now        func() time.Time
+	// releases is where wf lock reads a release's checksums from.
+	releases string
 }
 
 // New returns wf's command line, reporting version, working on the project at dir, reading answers
 // from stdin and writing to stdout and stderr. wf asks a question only when stdin is a terminal.
 func New(version, dir string, stdin io.Reader, stdout, stderr io.Writer) *App {
-	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, components: component.All, now: time.Now}
+	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, components: component.All, now: time.Now, releases: launcher.ReleasesURL}
 	app.commands = []Command{
 		{Name: "init", Usage: "wf init [--forge <forge>]", Summary: "Start using wf in this project: .wf.yml, the base, and every assistant's files", run: runInit},
 		{Name: "add", Usage: "wf add [<component>] [--<option> …] [--force]", Summary: "Add a component to the project; with no component, list them", run: runAdd},
+		{Name: "lock", Usage: "wf lock", Summary: "Record the pinned wf release's fingerprints in .wf.sum, which every download of it is checked against", run: runLock},
 		{Name: "sync", Usage: "wf sync [--check | --force]", Summary: "Write every assistant's files from .agents; --check only compares", run: runSync},
 		{Name: "show", Usage: "wf show <skill> [--base]", Summary: "Print a skill as an assistant reads it; --base for wf's part alone", run: runShow},
 		{Name: "worktree", Usage: "wf worktree <issue> <slug> | wf worktree plan <slug>", Summary: "Give an Issue or a plan its own worktree, or find it; prints its path last", run: runWorktree},
@@ -97,13 +101,19 @@ func (app *App) Run(args []string) int {
 			return exitOK
 		}
 		fmt.Fprintf(app.stderr, "wf %s: %v\n", name, err)
-		var mistake *project.UserError
-		if errors.Is(err, errUsage) || errors.As(err, &mistake) {
-			return exitUsage
-		}
-		return exitFailure
+		return exitCode(err)
 	}
 	return exitOK
+}
+
+// exitCode is the exit code of a command that failed with err: the developer's mistake, or wf's
+// failure.
+func exitCode(err error) int {
+	var mistake *project.UserError
+	if errors.Is(err, errUsage) || errors.As(err, &mistake) {
+		return exitUsage
+	}
+	return exitFailure
 }
 
 // parseFlags parses args into flags, and any mistake in them is a usage error. -h prints the
