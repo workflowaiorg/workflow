@@ -55,6 +55,8 @@ type Config struct {
 	Worktree Worktree
 	// Gate holds the project's own steps for /pre-mr-check.
 	Gate []GateStep
+	// Doctor holds the project's own checks for wf doctor and wf scaffold.
+	Doctor []Check
 	// Components holds the components wf add installed, by name, each with the answers it was
 	// given, by option.
 	Components map[string]map[string]any
@@ -67,6 +69,17 @@ type GateStep struct {
 	Name  string
 	Paths []string
 	Run   string
+}
+
+// Check is one check of wf doctor: a command that passes when it exits 0.
+type Check struct {
+	Name string
+	Run  string
+	// Fix is the command wf scaffold runs when the check fails, before it checks again. A check
+	// with none is a problem the developer fixes by hand.
+	Fix string
+	// WhenUp makes the check run only while the stack is up.
+	WhenUp bool
 }
 
 // Worktree holds the gitignored files a new worktree needs.
@@ -119,6 +132,9 @@ func Load(dir string) (Config, error) {
 	gate, gateProblems := readGate(values["gate"])
 	config.Gate = gate
 	problems = append(problems, gateProblems...)
+	doctor, doctorProblems := readDoctor(values["doctor"])
+	config.Doctor = doctor
+	problems = append(problems, doctorProblems...)
 	components, componentProblems := readComponents(values["components"])
 	config.Components = components
 	problems = append(problems, componentProblems...)
@@ -169,6 +185,59 @@ func readGate(value any) ([]GateStep, []string) {
 		gate = append(gate, GateStep{Name: name, Paths: paths, Run: run})
 	}
 	return gate, problems
+}
+
+// readDoctor reads doctor:, the project's own checks for wf doctor, saying what is wrong with it:
+// a list of entries, each with a name and the command to run, and optionally the command that
+// fixes it and when: up.
+func readDoctor(value any) ([]Check, []string) {
+	if value == nil {
+		return nil, nil
+	}
+	entries, ok := value.([]any)
+	if !ok {
+		return nil, []string{"doctor: is a list of checks, each with name: and run:"}
+	}
+	var checks []Check
+	var problems []string
+	for i, entry := range entries {
+		fields, _ := entry.(map[string]any)
+		name, _ := fields["name"].(string)
+		where := fmt.Sprintf("doctor[%d]", i)
+		if name != "" {
+			where += " (" + name + ")"
+		}
+		var wrong []string
+		if name == "" {
+			wrong = append(wrong, "needs name: the check's name")
+		}
+		run, isText := fields["run"].(string)
+		switch {
+		case fields["run"] != nil && !isText:
+			wrong = append(wrong, `has a run: that YAML does not read as text; put it in quotes, such as run: "false"`)
+		case run == "":
+			wrong = append(wrong, "needs run: the command, which passes when it exits 0")
+		}
+		fix, ok := fields["fix"].(string)
+		if fields["fix"] != nil && (!ok || fix == "") {
+			wrong = append(wrong, "has a fix: that is not a command")
+		}
+		when, ok := fields["when"].(string)
+		if fields["when"] != nil && (!ok || when != "up") {
+			wrong = append(wrong, "has a when: other than up")
+		}
+		for _, key := range slices.Sorted(maps.Keys(fields)) {
+			if !slices.Contains([]string{"name", "run", "fix", "when"}, key) {
+				wrong = append(wrong, "has "+key+":, which is not name:, run:, fix: or when:")
+			}
+		}
+		if len(wrong) > 0 {
+			problems = append(problems, where+" "+strings.Join(wrong, ", "))
+			continue
+		}
+		checks = append(checks, Check{Name: name, Run: run, Fix: fix, WhenUp: when == "up"})
+	}
+	return checks, problems
 }
 
 // readComponents reads components:, which wf add writes: each component's name, holding its

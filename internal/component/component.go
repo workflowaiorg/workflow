@@ -28,6 +28,8 @@ type Component struct {
 	Skeleton fs.FS
 	// Gate holds its steps for /pre-mr-check.
 	Gate []project.GateStep
+	// Doctor holds its checks for wf doctor, which run before the project's own.
+	Doctor []project.Check
 	// Commands are run as wf <name> <command>.
 	Commands []Command
 	// Edits says what the developer should change by hand in files the project owns. wf never
@@ -163,6 +165,15 @@ func Gate(components []Component) []project.GateStep {
 		gate = append(gate, c.Gate...)
 	}
 	return gate
+}
+
+// Doctor returns the doctor checks of components, in order.
+func Doctor(components []Component) []project.Check {
+	var checks []project.Check
+	for _, c := range components {
+		checks = append(checks, c.Doctor...)
+	}
+	return checks
 }
 
 // String names the component in messages.

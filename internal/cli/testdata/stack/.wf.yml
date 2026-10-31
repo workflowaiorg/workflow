@@ -1,0 +1,15 @@
+wf: 0.1.0
+forge: gitlab
+
+components:
+  sample:
+    db: postgres
+    grpc: false
+
+doctor:
+  - name: env file
+    run: test -f .env
+    fix: cp .env.example .env
+  - name: app answers
+    run: docker compose ps --status running --quiet | grep -q .
+    when: up

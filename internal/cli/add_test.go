@@ -29,6 +29,7 @@ var sample = component.Component{
 	},
 	Skeleton: fstest.MapFS{"sample/config.txt": {Data: []byte("the project's own\n")}},
 	Gate:     []project.GateStep{{Name: "sample test", Paths: []string{"sample/**"}, Run: "wf sample hello"}},
+	Doctor:   []project.Check{{Name: "sample tool installed", Run: "true"}},
 	Commands: []component.Command{{
 		Name: "hello", Usage: "wf sample hello", Summary: "Say hello from the database",
 		Run: func(ctx component.Context, args []string) error {
