@@ -67,7 +67,7 @@ func TestHelpJSONListsEveryCommand(t *testing.T) {
 		}
 		names = append(names, command.Name)
 	}
-	want := []string{"init", "add", "lock", "sync", "show", "worktree", "spec-coverage", "version", "help"}
+	want := []string{"init", "add", "lock", "sync", "show", "worktree", "up", "down", "doctor", "scaffold", "spec-coverage", "version", "help"}
 	if !slices.Equal(names, want) {
 		t.Errorf("commands = %v, want %v", names, want)
 	}
@@ -182,7 +182,7 @@ func TestSyncLeavesFilesItDidNotWriteUntilForced(t *testing.T) {
 }
 
 func TestCommandHelp(t *testing.T) {
-	for _, name := range []string{"init", "add", "lock", "sync", "show", "worktree", "spec-coverage"} {
+	for _, name := range []string{"init", "add", "lock", "sync", "show", "worktree", "up", "down", "doctor", "scaffold", "spec-coverage"} {
 		code, stdout, stderr := run(t, name, "-h")
 		if code != 0 || !strings.HasPrefix(stdout, "usage: wf "+name) || stderr != "" {
 			t.Errorf("wf %s -h = (%d, %q, %q), want exit 0 and its usage line", name, code, stdout, stderr)

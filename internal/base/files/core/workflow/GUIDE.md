@@ -57,6 +57,9 @@ developer's own request starts with `Hotfix:`.
 | `wf show <skill> [--base]` | print a skill as an assistant reads it, or wf's part alone |
 | `wf worktree <issue> <slug>` | give an Issue its own worktree in `.claude/worktrees/`, or find the one it has; the path is printed last |
 | `wf worktree plan <slug>` | the same for a plan being drafted or revised |
+| `wf up [<service> …]`, `wf down` | start the stack in the background, or the services named while following their logs; stop it |
+| `wf doctor` | check that the machine and the stack are ready; changes nothing |
+| `wf scaffold` | take a clean clone to a running stack: fix what the checks find, start it, check it |
 | `wf spec-coverage` | every spec's `[ADR-NNNN]` resolves to an accepted record, every record is cited and indexed, every plan is named by its date |
 | `wf version` | the version of wf running |
 | `wf help [--json]` | every command; `--json` for agents |

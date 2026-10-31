@@ -11,6 +11,8 @@ What a project gets from it:
   its own, and nothing is committed until a person has read the work and said go.
 - **Checks** that the copies were not edited by hand and that the project's specs and decision
   records agree with each other.
+- **One way to run the project locally**: `wf up` and `wf down`, plus `wf doctor` and `wf scaffold`,
+  which check a machine and take a clean clone to a running stack.
 
 > wf is young. It works with GitLab only so far, and it can't update a project to a newer wf yet.
 > The milestone [v0.1.0](https://github.com/workflowaiorg/workflow/milestone/1) lists what comes
@@ -22,6 +24,7 @@ What a project gets from it:
 - [Start in a project](#start-in-a-project)
 - [A day with wf](#a-day-with-wf)
 - [Your rules and wf's rules](#your-rules-and-wfs-rules)
+- [Run the stack](#run-the-stack)
 - [Components](#components)
 - [Settings: .wf.yml](#settings-wfyml)
 - [Commands](#commands)
@@ -202,11 +205,54 @@ they point to, in `.agents/project/skills/domain-specs/SKILL.md`.
 `wf sync` overwrites your edit, and `wf sync --check` fails on it. Put the change in
 `.agents/project/` instead.
 
+## Run the stack
+
+wf runs the project's stack with docker compose, on the compose file at the project's root and every
+file it includes.
+
+```sh
+wf scaffold        # a clean clone to a running stack, in one command
+wf up              # start everything, in the background
+wf up api          # start api, and follow its logs; Ctrl-C stops it
+wf down            # stop everything
+wf doctor          # is this machine ready, and is the stack? Changes nothing
+```
+
+`wf doctor` runs checks, each a command that passes when it exits 0. They come from the components
+you added and from `doctor:` in `.wf.yml` (see [Settings](#settings-wfyml)). Each gets a line:
+
+```
+✓ docker running
+→ env file: wf scaffold fixes this with cp .env.example .env
+✗ go installed
+    sh: go: command not found
+– api answers: skipped, fix the problems above first
+```
+
+- `✓` passed.
+- `→` failed, but the check has a `fix:`, so `wf scaffold` fixes it. It does not fail `wf doctor`.
+  What the check printed is under it, as for `✗`.
+- `✗` failed, and you fix it by hand. What the check printed is under it. `wf doctor` exits 1.
+- `–` was skipped. A check marked `when: up` runs only while the stack is up and every check above it
+  passed. Otherwise its failure would only repeat theirs.
+
+`wf scaffold` does what a newcomer would do by hand, in order:
+
+1. runs the checks that do not need the stack. If one is `✗`, it stops and changes nothing;
+2. runs the `fix:` of each `→`, then that check again, which must now pass;
+3. starts the stack, as `wf up` does;
+4. runs the `when: up` checks, fixing those that fail and have a `fix:`, such as migrations.
+
+Run it again at any time: what already passes is left alone.
+
+A `when: up` check runs as soon as the stack has started, before its services are ready, so a
+check that waits for a service should retry on its own, as the `curl --retry` example below does.
+
 ## Components
 
 A component adds one capability to the project, such as a backend or a frontend. It brings its own
 skills, commands and sections of `AGENTS.md` and the guide; its own steps in `/pre-mr-check`'s gate;
-and its own wf commands, which start with its name: `wf <component> <command>`.
+its own checks in `wf doctor`; and its own wf commands, which start with its name: `wf <component> <command>`.
 
 ```sh
 wf add                    # list the components wf carries
@@ -249,6 +295,15 @@ gate:
     paths: ["**/*.go", "go.mod"]
     run: go test ./...
 
+# The project's own checks for wf doctor and wf scaffold. A check passes when run: exits 0.
+doctor:
+  - name: env file
+    run: test -f .env
+    fix: cp .env.example .env    # optional: what wf scaffold runs when the check fails
+  - name: api answers
+    run: curl -sf --retry 10 --retry-connrefused http://localhost:8000/health
+    when: up                     # optional: run only while the stack is up
+
 # The components wf add installed, with the answers given. wf add writes this.
 components:
   backend:
@@ -262,6 +317,8 @@ components:
 - `gate:` is optional. wf's two checks, `wf sync --check` and `wf spec-coverage`, are always in the
   gate. After you edit `gate:`, run `wf sync`: the gate table is part of the `/pre-mr-check` command
   that wf writes. A component's own steps come before yours.
+- `doctor:` is optional. A component's checks come before yours, and checks marked `when: up` run after all the others. A command YAML would read as
+  something else, such as `false`, goes in quotes: `run: "false"`.
 - `components:` is written by `wf add`. To change an answer, edit it here and run `wf sync`.
 
 ## Commands
@@ -353,6 +410,22 @@ worktree's path is printed last, on its own line.
 
 The same, for a plan. The branch is exactly `plan-<slug>`.
 
+### `wf up [<service> …]`, `wf down`
+
+`wf up` runs `docker compose up -d`: the whole stack, in the background. With services named, it
+starts only those and stays attached to their logs. The names are the ones in the compose file.
+Ctrl-C stops them, and wf waits until they have stopped. `wf down` runs `docker compose down`.
+
+### `wf doctor`
+
+Runs every check and changes nothing. It exits 1 when a check is `✗`, and 0 otherwise, even when
+`wf scaffold` has something to fix. See [Run the stack](#run-the-stack).
+
+### `wf scaffold`
+
+Fixes what the checks find, starts the stack, and runs the checks that need it. It stops before
+changing anything when a check needs fixing by hand. See [Run the stack](#run-the-stack).
+
 ### `wf spec-coverage [--report-only]`
 
 Checks that the project's specs and decision records agree:
@@ -379,6 +452,7 @@ included. `--json` gives the list in a form an agent can read.
 | 0 | done |
 | 1 | a check failed, or something went wrong |
 | 2 | the command was used wrongly: a typo, a missing flag, a missing setting in `.wf.yml` |
+| 130 | you pressed Ctrl-C in `wf up <service>` |
 
 wf asks a question only when it runs in a terminal. In a script or CI it fails instead, and names
 the flag to pass.
@@ -442,6 +516,14 @@ What wf installs:
 | `.wf.yml: pins no wf version` | Add `wf:` with the version `wf version` prints, such as `wf: 0.1.0` |
 | `.wf.yml: names no forge`, `forge: … is not one wf has a base for` | Set `forge:` to a forge wf knows: `gitlab` |
 | `.wf.yml: gate[0] (lint) needs …` | Give that step what it names: `name:`, `paths:` as a list, `run:` |
+| `.wf.yml: doctor[0] (…) needs …`, `has a … that …` | Give that check `name:` and `run:`; `fix:` is a command, and `when:` can only be `up` |
+| `has a run: that YAML does not read as text` | Put the command in quotes, such as `run: "false"` |
+| `N problems to fix by hand` (doctor), `… so nothing was changed` (scaffold) | Fix each `✗` line `wf doctor` prints, then run the command again |
+| `… still fails after its fix ran` | The check's `fix:` does not fix it. Run the fix by hand to see why, or correct it in `.wf.yml` |
+| `… fails with the stack up, and it has no fix: to run` | Look at that check's output and the stack's logs: `docker compose logs` |
+| `no .wf.yml in …: run wf in the project's root` | Run wf where `.wf.yml` is. `wf up` and `wf down` run there too, so compose uses the project's own compose file |
+| `docker compose …: exec: "docker": executable file not found` | Install Docker with its compose plugin, and make sure `docker` is on your `PATH` |
+| `docker compose …: exit status N` | docker printed why above. Is Docker running, and is there a compose file at the project's root? |
 | `.wf.yml: worktree.copy …`, `worktree.skip …` | Make it a list of globs, such as `[".env*"]`, and check each pattern |
 | `.wf.yml: components.<name> is not a component wf knows` | Run the wf version that added it: `.wf.yml` pins it |
 | `<component> and another part of the base both have <file>` | Two components clash; add only one of them, and report it |
