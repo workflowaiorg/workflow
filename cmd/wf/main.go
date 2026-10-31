@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"syscall"
 
 	"github.com/workflowaiorg/workflow/internal/cli"
 )
@@ -18,5 +19,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "wf: finding the current directory: %v\n", err)
 		os.Exit(1)
 	}
-	os.Exit(cli.New(cli.ResolveVersion(version), dir, os.Stdin, os.Stdout, os.Stderr).Run(os.Args[1:]))
+	os.Exit(cli.Main(cli.ResolveVersion(version), dir, os.Args[1:], os.Environ(), os.Stdin, os.Stdout, os.Stderr, syscall.Exec))
 }

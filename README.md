@@ -43,6 +43,31 @@ Check that it works:
 wf version
 ```
 
+### Every project runs the wf it pins
+
+You install wf once, any version. In a project, it runs the version the project's `.wf.yml` pins
+(`wf: 0.2.0`), not itself. So everyone on the team, and CI, generates the same files.
+
+When you run a command, wf:
+
+1. reads `wf:` in `.wf.yml`. No `.wf.yml`, no `wf:`, or the same version as itself: it just runs;
+2. looks for that version in its cache, `wf/` in your user cache folder (`~/Library/Caches` on
+   macOS; `$XDG_CACHE_HOME`, or else `~/.cache`, on Linux). If it is there, it runs it. No internet needed;
+3. otherwise downloads it from [Releases](https://github.com/workflowaiorg/workflow/releases) and
+   compares the download's fingerprint (its SHA-256) with the one in the project's `.wf.sum`. If
+   they match, it keeps the copy and runs it. If not, it deletes the download and runs nothing.
+
+`.wf.sum` is written by [`wf lock`](#wf-lock), once per version, and committed. A download is only
+trusted if it matches what your team reviewed.
+
+To run the wf you installed whatever the project pins, for example to try a build of wf itself:
+
+```sh
+WF_NO_LAUNCH=1 wf sync
+```
+
+Then the files it writes may differ from everyone else's.
+
 ## Start in a project
 
 Run this at the root of the repository:
@@ -70,9 +95,11 @@ Then:
 1. Read `.workflow/GUIDE.md`. It is the short manual for the workflow.
 2. Open `.wf.yml`. It has commented examples. Uncomment what your project needs (see
    [Settings](#settings-wfyml)).
-3. Commit everything `wf init` wrote. The assistants read these files from the repository.
-4. Add `/.claude/worktrees` to `.gitignore`. That is where `wf worktree` puts worktrees.
-5. Optional: run `wf sync --check` and `wf spec-coverage` in CI, so the checks bind everyone and
+3. Run `wf lock`. It records in `.wf.sum` what the wf version `.wf.yml` pins must look like when
+   someone downloads it. `wf init` doesn't do this itself, because it needs the internet.
+4. Commit everything `wf init` and `wf lock` wrote. The assistants read these files from the repository.
+5. Add `/.claude/worktrees` to `.gitignore`. That is where `wf worktree` puts worktrees.
+6. Optional: run `wf sync --check` and `wf spec-coverage` in CI, so the checks bind everyone and
    not only the people who run them.
 
 `wf init` refuses to run in a project that already has a `.wf.yml`.
@@ -255,6 +282,29 @@ passed on to its `wf sync`.
 
 Runs a command of an installed component. `wf <component> -h` lists them, and so does `wf help`.
 
+### `wf lock`
+
+Records in `.wf.sum` the fingerprint (SHA-256) of the release `.wf.yml` pins, one line for each
+platform wf runs on: macOS and Linux, Intel and ARM. It reads them from the release's
+`checksums.txt`. Commit `.wf.sum`: every later download of that version is checked against it.
+
+```
+wf_0.2.0_darwin_amd64.tar.gz sha256:…
+wf_0.2.0_darwin_arm64.tar.gz sha256:…
+wf_0.2.0_linux_amd64.tar.gz sha256:…
+wf_0.2.0_linux_arm64.tar.gz sha256:…
+```
+
+Run it after `wf init`, and again each time you change `wf:` in `.wf.yml`. It keeps only the
+pinned version's lines.
+
+- If `.wf.sum` already holds them, it does nothing and needs no internet.
+- It never replaces a fingerprint already recorded with a different one. If the release no longer
+  matches what was recorded, it fails and leaves `.wf.sum` alone.
+
+`wf lock` always runs as the wf you installed, never as the pinned version: it writes the file the
+pinned version is checked against. Don't edit `.wf.sum` by hand.
+
 ### `wf sync`
 
 Writes every assistant's files from `.agents/base/` and `.agents/project/`. Run it after you change
@@ -338,6 +388,7 @@ the flag to pass.
 ```
 .wf.yml                              your settings
 .wf.lock                             what wf sync last wrote; never edited
+.wf.sum                              what the pinned wf's download must look like; written by wf lock
 .agents/base/                        wf's part; never edited
 .agents/project/                     your part, in the same layout:
   AGENTS.md                            → AGENTS.md, .claude/CLAUDE.md, .github/copilot-instructions.md
@@ -376,7 +427,15 @@ What wf installs:
 | `<file>: differs from what wf sync writes` | Move your edit to `.agents/project/`, then run `wf sync` |
 | `<file>: missing`, `no longer generated`, `.wf.lock: out of date` | Run `wf sync` and commit what it writes |
 | `.agents/base/…: differs from wf vX's base` | Restore the file (`git checkout -- .agents/base`). Put your change in `.agents/project/` |
-| `pins wf vX, but this is wf vY` | Install the version `.wf.yml` pins |
+| `pins wf vX, but this is wf vY` | You ran with `WF_NO_LAUNCH=1`, or a wf older than the launcher. Run without `WF_NO_LAUNCH`, or install a newer wf |
+| `.wf.sum holds no fingerprint of …` | Run `wf lock` and commit `.wf.sum` |
+| `refusing wf X: the download of … is …, but .wf.sum records …` | The download is not what your team recorded. Nothing ran. Don't work around it: tell whoever looks after wf in your project |
+| `refusing: the release now gives … the fingerprint …` | The release changed after `.wf.sum` recorded it. `.wf.sum` was left alone. Same as above |
+| `.wf.sum: line N is not …`, `… is listed twice` | Restore `.wf.sum` from git, then run `wf lock` |
+| `pins wf X, which has no release` | Fix `wf:` in `.wf.yml`: there is no such release |
+| `wf has no release for <platform>` | wf runs on macOS and Linux only |
+| `was started as wf X, but is wf Y` | `WF_HANDOVER_VERSION` is set in your shell; unset it. A wf from before the launcher (0.1.0-alpha.1) leaves it set for what it runs, so pin a newer one |
+| `running wf X from <path>: …` | The cached copy is broken. Delete the folder that holds it, and run the command again to download it anew |
 | `skipped … (not written by wf)` | A file of your own is at a path wf writes to. Move it, or run `wf sync --force` to replace it |
 | `kept … (no longer generated, but edited by hand)` | wf no longer writes this file, and someone edited it. Delete it yourself if you don't need it |
 | `a template takes no project part` | Move that text into `.agents/project/skills/domain-specs/SKILL.md` and delete the file |

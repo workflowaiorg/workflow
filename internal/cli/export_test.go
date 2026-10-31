@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/workflowaiorg/workflow/internal/component"
+	"github.com/workflowaiorg/workflow/internal/launcher"
 )
 
 // ModuleVersion exposes moduleVersion to the external tests.
@@ -23,3 +24,13 @@ func (app *App) Output() (stdout, stderr *bytes.Buffer) {
 
 // SetComponents makes components the ones wf add offers.
 func (app *App) SetComponents(components ...component.Component) { app.components = components }
+
+// SetReleases makes wf lock read releases from url.
+func (app *App) SetReleases(url string) { app.releases = url }
+
+// ConfigureLauncher makes Main adjust its launcher with configure, until the returned func runs.
+func ConfigureLauncher(configure func(*launcher.Launcher)) (restore func()) {
+	previous := configureLauncher
+	configureLauncher = configure
+	return func() { configureLauncher = previous }
+}
