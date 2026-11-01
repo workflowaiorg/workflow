@@ -20,7 +20,6 @@ import (
 	"github.com/workflowaiorg/workflow/internal/component/backend"
 	"github.com/workflowaiorg/workflow/internal/launcher"
 	"github.com/workflowaiorg/workflow/internal/project"
-	"github.com/workflowaiorg/workflow/internal/stack"
 )
 
 // Exit codes. Usage errors are told apart from failures, so a script can tell a typo from a fault.
@@ -28,8 +27,6 @@ const (
 	exitOK      = 0
 	exitFailure = 1
 	exitUsage   = 2
-	// exitInterrupted is what a shell gives a command stopped with Ctrl-C.
-	exitInterrupted = 130
 )
 
 // errUsage marks an error that is the caller's mistake, not wf's.
@@ -75,10 +72,8 @@ func New(version, dir string, stdin io.Reader, stdout, stderr io.Writer) *App {
 		{Name: "sync", Usage: "wf sync [--check | --force]", Summary: "Write every assistant's files from .agents; --check only compares", run: runSync},
 		{Name: "show", Usage: "wf show <skill> [--base]", Summary: "Print a skill as an assistant reads it; --base for wf's part alone", run: runShow},
 		{Name: "worktree", Usage: "wf worktree <issue> <slug> | wf worktree plan <slug>", Summary: "Give an Issue or a plan its own worktree, or find it; prints its path last", run: runWorktree},
-		{Name: "up", Usage: "wf up [<service> …]", Summary: "Start the stack in the background; with services named, start those and follow their logs", run: runUp},
-		{Name: "down", Usage: "wf down", Summary: "Stop the stack", run: runDown},
-		{Name: "doctor", Usage: "wf doctor", Summary: "Check that the machine and the stack are ready; changes nothing", run: runDoctor},
-		{Name: "scaffold", Usage: "wf scaffold", Summary: "Take a clean clone to a running stack: fix what the checks find, then start it", run: runScaffold},
+		{Name: "doctor", Usage: "wf doctor", Summary: "Check that the machine and the repo are ready; changes nothing", run: runDoctor},
+		{Name: "scaffold", Usage: "wf scaffold", Summary: "Take a clean clone to a ready repo: run the fix of each check that fails", run: runScaffold},
 		{Name: "spec-coverage", Usage: "wf spec-coverage [--report-only]", Summary: "Check that specs, decision records and their index agree", run: runSpecCoverage},
 		{Name: "version", Usage: "wf version", Summary: "Print wf's version", run: runVersion},
 		{Name: "help", Usage: "wf help [--json]", Summary: "List wf's commands; --json for agents", run: runHelp},
@@ -106,9 +101,6 @@ func (app *App) Run(args []string) int {
 	if err := run(app, rest); err != nil {
 		if errors.Is(err, errHelpShown) {
 			return exitOK
-		}
-		if errors.Is(err, stack.ErrInterrupted) {
-			return exitInterrupted
 		}
 		fmt.Fprintf(app.stderr, "wf %s: %v\n", name, err)
 		return exitCode(err)

@@ -78,8 +78,6 @@ type Check struct {
 	// Fix is the command wf scaffold runs when the check fails, before it checks again. A check
 	// with none is a problem the developer fixes by hand.
 	Fix string
-	// WhenUp makes the check run only while the stack is up.
-	WhenUp bool
 }
 
 // Worktree holds the gitignored files a new worktree needs.
@@ -189,7 +187,7 @@ func readGate(value any) ([]GateStep, []string) {
 
 // readDoctor reads doctor:, the project's own checks for wf doctor, saying what is wrong with it:
 // a list of entries, each with a name and the command to run, and optionally the command that
-// fixes it and when: up.
+// fixes it.
 func readDoctor(value any) ([]Check, []string) {
 	if value == nil {
 		return nil, nil
@@ -222,20 +220,16 @@ func readDoctor(value any) ([]Check, []string) {
 		if fields["fix"] != nil && (!ok || fix == "") {
 			wrong = append(wrong, "has a fix: that is not a command")
 		}
-		when, ok := fields["when"].(string)
-		if fields["when"] != nil && (!ok || when != "up") {
-			wrong = append(wrong, "has a when: other than up")
-		}
 		for _, key := range slices.Sorted(maps.Keys(fields)) {
-			if !slices.Contains([]string{"name", "run", "fix", "when"}, key) {
-				wrong = append(wrong, "has "+key+":, which is not name:, run:, fix: or when:")
+			if !slices.Contains([]string{"name", "run", "fix"}, key) {
+				wrong = append(wrong, "has "+key+":, which is not name:, run: or fix:")
 			}
 		}
 		if len(wrong) > 0 {
 			problems = append(problems, where+" "+strings.Join(wrong, ", "))
 			continue
 		}
-		checks = append(checks, Check{Name: name, Run: run, Fix: fix, WhenUp: when == "up"})
+		checks = append(checks, Check{Name: name, Run: run, Fix: fix})
 	}
 	return checks, problems
 }

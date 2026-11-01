@@ -2,8 +2,8 @@
 
 wf is a Go CLI that brings an AI-assisted engineering workflow into Go projects: the skills,
 commands and subagents that AI coding assistants read, the planning and review workflow around
-them, and optional developer commands for a Go backend on docker compose. Its Issues live in this repo's
-GitHub Issues; the milestone says which release each belongs to.
+them, and optional components such as a Go backend. wf manages the project; it never starts or stops
+the app. Its Issues live in this repo's GitHub Issues; the milestone says which release each belongs to.
 
 ## How work is done
 

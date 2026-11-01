@@ -10,6 +10,3 @@ doctor:
   - name: env file
     run: test -f .env
     fix: cp .env.example .env
-  - name: app answers
-    run: docker compose ps --status running --quiet | grep -q .
-    when: up
