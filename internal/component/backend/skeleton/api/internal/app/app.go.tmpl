@@ -2,14 +2,30 @@
 // at start.
 package app
 
-import "[[ .module ]]/api/internal/config"
+import (
+[[- if .postgres ]]
+	"github.com/uptrace/bun"
+[[ end ]]
+	"[[ .module ]]/api/internal/config"
+[[- if .postgres ]]
+	"[[ .module ]]/pkg/postgres"
+[[- end ]]
+)
 
 // App is the service's shared state, handed to each route.
 type App struct {
 	Config *config.Config
+[[- if .postgres ]]
+	// DB is the service's one pool of connections to PostgreSQL, which every repository shares.
+	DB *bun.DB
+[[- end ]]
 }
 
 // New returns the App of a service started with cfg.
 func New(cfg *config.Config) *App {
+[[- if .postgres ]]
+	return &App{Config: cfg, DB: postgres.Open(cfg.PostgresDSN)}
+[[- else ]]
 	return &App{Config: cfg}
+[[- end ]]
 }

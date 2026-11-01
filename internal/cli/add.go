@@ -82,6 +82,7 @@ func runAdd(app *App, args []string) error {
 		}
 	}
 
+	c = c.With(answers)
 	if c.Check != nil {
 		if err := c.Check(app.dir, answers); err != nil {
 			return err

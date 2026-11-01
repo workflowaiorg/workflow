@@ -1,19 +1,41 @@
 // Package config is everything the service reads from its environment, read once at start.
 package config
 
-import "os"
+import (
+[[- if .postgres ]]
+	"net"
+	"net/url"
+[[- end ]]
+	"os"
+)
 
 // Config is the service's settings.
 type Config struct {
 	// Port is the port the service listens on: PORT, or 8000.
 	Port string
+[[- if .postgres ]]
+
+	// PostgresDSN is where the database is, built from POSTGRES_HOST, POSTGRES_PORT,
+	// POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB and POSTGRES_SSLMODE: each defaults to the
+	// local stack's.
+	PostgresDSN string
+[[- end ]]
 }
 
 // Load reads the settings from the environment. It is the only place the service reads it.
 func Load() *Config {
-	return &Config{
-		Port: getenv("PORT", "8000"),
+	cfg := &Config{Port: getenv("PORT", "8000")}
+[[- if .postgres ]]
+	dsn := url.URL{
+		Scheme:   "postgres",
+		User:     url.UserPassword(getenv("POSTGRES_USER", "app"), getenv("POSTGRES_PASSWORD", "app")),
+		Host:     net.JoinHostPort(getenv("POSTGRES_HOST", "postgres"), getenv("POSTGRES_PORT", "5432")),
+		Path:     "/" + getenv("POSTGRES_DB", "app"),
+		RawQuery: url.Values{"sslmode": {getenv("POSTGRES_SSLMODE", "disable")}}.Encode(),
 	}
+	cfg.PostgresDSN = dsn.String()
+[[- end ]]
+	return cfg
 }
 
 func getenv(key, fallback string) string {

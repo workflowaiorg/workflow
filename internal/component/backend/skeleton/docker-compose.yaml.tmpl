@@ -1,0 +1,66 @@
+# The local stack: docker compose up -d starts it, docker compose down stops it. Each Go service is
+# built from its source when it starts, then exec'd, so the server itself gets the stop signal and
+# drains its requests; the two go- volumes keep downloaded modules and builds between starts.
+services:
+  api:
+    image: golang:1.25-alpine
+    working_dir: /app
+    command: ["sh", "-c", "go build -o /tmp/api ./api/cmd/http && exec /tmp/api"]
+    # Longer than the server's own five seconds to drain, whatever Docker's default is.
+    stop_grace_period: 10s
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+      - go-modules:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+[[- if .postgres ]]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: app
+      POSTGRES_DB: app
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d app"]
+      interval: 2s
+      retries: 30
+
+  # Applies the migrations in migrations/, then exits; every service that keeps data starts after
+  # it. With no migration yet there is nothing to apply. goose is pinned, and built without the
+  # drivers of other databases.
+  migrate:
+    image: golang:1.25-alpine
+    working_dir: /app
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_DBSTRING: postgres://app:app@postgres:5432/app?sslmode=disable
+      GOOSE_MIGRATION_DIR: migrations
+    command:
+      - sh
+      - -c
+      - >-
+        ls migrations/*.sql >/dev/null 2>&1 || exit 0;
+        exec go run -tags=no_clickhouse,no_libsql,no_mssql,no_mysql,no_sqlite3,no_vertica,no_ydb
+        github.com/pressly/goose/v3/cmd/goose@v3.27.0 up
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./:/app
+      - go-modules:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+[[- end ]]
+
+volumes:
+  go-modules:
+  go-build:
+[[- if .postgres ]]
+  postgres-data:
+[[- end ]]

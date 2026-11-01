@@ -16,3 +16,19 @@ func TestLoad(t *testing.T) {
 		t.Errorf("Port with PORT=9000 = %q, want 9000", got)
 	}
 }
+[[- if .postgres ]]
+
+func TestPostgresDSN(t *testing.T) {
+	for _, key := range []string{"POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB", "POSTGRES_SSLMODE"} {
+		t.Setenv(key, "")
+	}
+	if got, want := config.Load().PostgresDSN, "postgres://app:app@postgres:5432/app?sslmode=disable"; got != want {
+		t.Errorf("PostgresDSN with nothing set = %q, want the local stack's %q", got, want)
+	}
+	t.Setenv("POSTGRES_PASSWORD", "p@ss/word")
+	t.Setenv("POSTGRES_SSLMODE", "require")
+	if got, want := config.Load().PostgresDSN, "postgres://app:p%40ss%2Fword@postgres:5432/app?sslmode=require"; got != want {
+		t.Errorf("PostgresDSN = %q, want the password escaped: %q", got, want)
+	}
+}
+[[- end ]]

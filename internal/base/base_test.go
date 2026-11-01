@@ -144,7 +144,7 @@ func TestFilesAddsEachComponentsPart(t *testing.T) {
 		for path, content := range files {
 			fsys[path] = &fstest.MapFile{Data: []byte(content)}
 		}
-		return component.Component{Name: name, Base: fsys}
+		return component.Component{Name: name, Part: component.Part{Base: fsys}}
 	}
 	a := part("a", map[string]string{"AGENTS.md": "## A\n", "workflow/GUIDE.md": "## A's guide\n", "skills/a/SKILL.md": "a"})
 	b := part("b", map[string]string{"AGENTS.md": "## B\n"})
@@ -171,13 +171,13 @@ func TestFilesAddsEachComponentsPart(t *testing.T) {
 }
 
 func TestComponentSkeletonRendersItsTemplates(t *testing.T) {
-	skeleton := component.Component{Name: "sample", Skeleton: fstest.MapFS{
+	skeleton := component.Component{Name: "sample", Part: component.Part{Skeleton: fstest.MapFS{
 		"go.mod.tmpl":  {Data: []byte("module [[ .module ]]\n")},
 		"main.go.tmpl": {Data: []byte("package main\n\nimport _ \"[[ .module ]]/pkg\"\n")},
 		"README.md":    {Data: []byte("Written as it is: [[ not a template ]]\n")},
 		"kept.txt":     {Data: []byte("wf's\n")},
 		"kept.go.tmpl": {Data: []byte("package kept // wf's\n")},
-	}}
+	}}}
 	dir := t.TempDir()
 	for name, content := range map[string]string{"kept.txt": "the project's\n", "kept.go": "package kept // the project's\n"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
@@ -217,7 +217,7 @@ func TestComponentSkeletonRefusesABrokenTemplate(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			skeleton := component.Component{Name: "sample", Skeleton: fstest.MapFS{"broken.tmpl": {Data: []byte(test.template)}}}
+			skeleton := component.Component{Name: "sample", Part: component.Part{Skeleton: fstest.MapFS{"broken.tmpl": {Data: []byte(test.template)}}}}
 			dir := t.TempDir()
 			_, err := base.ComponentSkeleton(dir, skeleton, map[string]any{"module": "example.com/shop"})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
@@ -227,5 +227,31 @@ func TestComponentSkeletonRefusesABrokenTemplate(t *testing.T) {
 				t.Errorf("a broken template still wrote %d files", len(entries))
 			}
 		})
+	}
+}
+
+func TestComponentSkeletonRefusesTwoPartsWithTheSameFile(t *testing.T) {
+	sample := component.Component{
+		Name: "sample",
+		Part: component.Part{Skeleton: fstest.MapFS{"x.txt": {Data: []byte("the component's\n")}}},
+		Options: []component.Option{{Name: "extra", Bool: true, Default: "false", Part: component.Part{
+			Skeleton: fstest.MapFS{"x.txt": {Data: []byte("the option's\n")}},
+		}}},
+	}
+	for _, test := range []struct {
+		extra bool
+		want  string
+	}{
+		{extra: false},
+		{extra: true, want: "two of its parts both have x.txt"},
+	} {
+		dir := t.TempDir()
+		_, err := base.ComponentSkeleton(dir, sample, map[string]any{"extra": test.extra})
+		switch {
+		case test.want == "" && err != nil:
+			t.Errorf("extra=%v: ComponentSkeleton = %v, want no error", test.extra, err)
+		case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
+			t.Errorf("extra=%v: ComponentSkeleton = %v, want it to say %q", test.extra, err, test.want)
+		}
 	}
 }

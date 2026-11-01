@@ -2,6 +2,7 @@ package cli_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,16 +21,26 @@ var sample = component.Component{
 	Summary: "A component for tests",
 	Options: []component.Option{
 		{Name: "db", Question: "Which database", Default: "postgres", Choices: []string{"postgres", "sqlite"}},
-		{Name: "grpc", Question: "Serve gRPC too", Bool: true, Default: "false"},
+		{
+			Name: "grpc", Question: "Serve gRPC too", Bool: true, Default: "false",
+			Part: component.Part{
+				Base:     fstest.MapFS{"skills/sample-grpc/SKILL.md": {Data: []byte("---\nname: sample-grpc\ndescription: \"Serving gRPC\"\n---\n\nProtos.\n")}},
+				Skeleton: fstest.MapFS{"sample/protos.txt": {Data: []byte("protos\n")}},
+				Gate:     []project.GateStep{{Name: "sample protos", Paths: []string{"sample/**"}, Run: "sample-protos"}},
+				Doctor:   []project.Check{{Name: "sample protoc installed", Run: "true"}},
+			},
+		},
 	},
-	Base: fstest.MapFS{
-		"AGENTS.md": {Data: []byte("## Sample\n\nThe sample component's rules.\n")},
-		"skills/sample/SKILL.md": {Data: []byte("---\nname: sample\ndescription: \"Using the sample component\"\n---\n\n" +
-			"Database: [[ .components.sample.db ]].\n")},
+	Part: component.Part{
+		Base: fstest.MapFS{
+			"AGENTS.md": {Data: []byte("## Sample\n\nThe sample component's rules.\n")},
+			"skills/sample/SKILL.md": {Data: []byte("---\nname: sample\ndescription: \"Using the sample component\"\n---\n\n" +
+				"Database: [[ .components.sample.db ]].\n")},
+		},
+		Skeleton: fstest.MapFS{"sample/config.txt": {Data: []byte("the project's own\n")}},
+		Gate:     []project.GateStep{{Name: "sample test", Paths: []string{"sample/**"}, Run: "sample-test"}},
+		Doctor:   []project.Check{{Name: "sample tool installed", Run: "true"}},
 	},
-	Skeleton: fstest.MapFS{"sample/config.txt": {Data: []byte("the project's own\n")}},
-	Gate:     []project.GateStep{{Name: "sample test", Paths: []string{"sample/**"}, Run: "sample-test"}},
-	Doctor:   []project.Check{{Name: "sample tool installed", Run: "true"}},
 	Edits: func(answers map[string]any) []string {
 		return []string{"add /sample/cache to .gitignore"}
 	},
@@ -104,8 +115,38 @@ func TestAddInstallsEveryPartOfAComponent(t *testing.T) {
 	if code, _, stderr := runSample(t, dir, "sync", "--check"); code != 0 {
 		t.Errorf("wf sync --check after wf add = (%d, %q), want it up to date", code, stderr)
 	}
+	optionParts(t, dir, true)
 	if code, _, stderr := runSample(t, dir, "add", "sample", "--db=sqlite", "--grpc=false"); code != 2 || !strings.Contains(stderr, "installed already") {
 		t.Errorf("a second wf add sample = (%d, %q), want exit 2 saying it is installed", code, stderr)
+	}
+}
+
+func TestAnOptionAnsweredNoBringsNothing(t *testing.T) {
+	dir := initialised(t)
+	if code, _, stderr := runSample(t, dir, "add", "sample", "--db=sqlite", "--grpc=false"); code != 0 {
+		t.Fatalf("wf add sample = (%d, %q)", code, stderr)
+	}
+	optionParts(t, dir, false)
+	if code, _, stderr := runSample(t, dir, "sync", "--check"); code != 0 {
+		t.Errorf("wf sync --check after wf add = (%d, %q), want it up to date", code, stderr)
+	}
+}
+
+// optionParts checks that every part of the sample's grpc option is in the project at dir when
+// chosen, and that none of it is when not.
+func optionParts(t *testing.T, dir string, chosen bool) {
+	t.Helper()
+	for _, name := range []string{".agents/base/skills/sample-grpc/SKILL.md", ".claude/skills/sample-grpc/SKILL.md", "sample/protos.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != chosen {
+			t.Errorf("with grpc %v, %s exists = %v", chosen, name, err == nil)
+		}
+	}
+	if got := strings.Contains(read(t, dir, ".claude/commands/pre-mr-check.md"), "| sample protos |"); got != chosen {
+		t.Errorf("with grpc %v, the gate has the option's step = %v", chosen, got)
+	}
+	_, stdout, _ := runSample(t, dir, "doctor")
+	if got := strings.Contains(stdout, "sample protoc installed"); got != chosen {
+		t.Errorf("with grpc %v, wf doctor runs the option's check = %v:\n%s", chosen, got, stdout)
 	}
 }
 
@@ -230,32 +271,42 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("downloads modules")
 	}
-	dir := t.TempDir()
-	app := cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
-	if code, _, stderr := runWith(t, app, "init", "--forge=gitlab"); code != 0 {
-		t.Fatalf("wf init exited %d: %s", code, stderr)
-	}
-	app = cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
-	code, _, stderr := runWith(t, app, "add", "backend", "--module=example.com/shop")
-	if code != 0 {
-		t.Fatalf("wf add backend exited %d: %s", code, stderr)
-	}
-	if !strings.Contains(stderr, "by hand  run go mod tidy") {
-		t.Errorf("wf add backend does not say to run go mod tidy:\n%s", stderr)
-	}
-	for _, skill := range []string{"architecture", "api-design", "configuration", "error-handling", "shared-packages", "testing", "go-style"} {
-		if _, err := os.Stat(filepath.Join(dir, ".claude/skills", skill, "SKILL.md")); err != nil {
-			t.Errorf("the %s skill was not installed: %v", skill, err)
-		}
-	}
+	for _, postgres := range []bool{false, true} {
+		t.Run(fmt.Sprintf("postgres %v", postgres), func(t *testing.T) {
+			dir := t.TempDir()
+			app := cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
+			if code, _, stderr := runWith(t, app, "init", "--forge=gitlab"); code != 0 {
+				t.Fatalf("wf init exited %d: %s", code, stderr)
+			}
+			app = cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
+			code, _, stderr := runWith(t, app, "add", "backend", "--module=example.com/shop", fmt.Sprintf("--postgres=%v", postgres))
+			if code != 0 {
+				t.Fatalf("wf add backend exited %d: %s", code, stderr)
+			}
+			if !strings.Contains(stderr, "by hand  run go mod tidy") {
+				t.Errorf("wf add backend does not say to run go mod tidy:\n%s", stderr)
+			}
+			for _, skill := range []string{"architecture", "api-design", "configuration", "error-handling", "shared-packages", "testing", "go-style"} {
+				if _, err := os.Stat(filepath.Join(dir, ".claude/skills", skill, "SKILL.md")); err != nil {
+					t.Errorf("the %s skill was not installed: %v", skill, err)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(dir, ".claude/skills/database/SKILL.md")); (err == nil) != postgres {
+				t.Errorf("with postgres %v, the database skill is installed = %v", postgres, err == nil)
+			}
 
-	t.Setenv("GOWORK", "off")
-	t.Setenv("GOFLAGS", "")
-	for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {
-		command := exec.Command("go", args...)
-		command.Dir = dir
-		if out, err := command.CombinedOutput(); err != nil {
-			t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
-		}
+			t.Setenv("GOWORK", "off")
+			t.Setenv("GOFLAGS", "")
+			for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {
+				command := exec.Command("go", args...)
+				command.Dir = dir
+				if out, err := command.CombinedOutput(); err != nil {
+					t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
+				}
+			}
+			if got := strings.Contains(read(t, dir, "go.mod"), "github.com/uptrace/bun"); got != postgres {
+				t.Errorf("with postgres %v, go.mod requires bun = %v", postgres, got)
+			}
+		})
 	}
 }

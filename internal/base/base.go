@@ -41,28 +41,40 @@ func Files(forge string, components []component.Component) (map[string][]byte, e
 			return nil, err
 		}
 	}
+	// Each part of a component, its own and its chosen options', adds to the base as a component does.
 	for _, c := range components {
-		if c.Base == nil {
-			continue
-		}
-		part := map[string][]byte{}
-		if err := read(c.Base, ".", part); err != nil {
-			return nil, fmt.Errorf("reading %s: %w", c, err)
-		}
-		for _, name := range slices.Sorted(maps.Keys(part)) {
-			existing, taken := base[name]
-			switch {
-			case slices.Contains(sections, name) && taken:
-				base[name] = slices.Concat(bytes.TrimRight(existing, "\n"), []byte("\n\n"), part[name])
-			case taken:
-				// Two sources of one file would leave one of them silently unused.
-				return nil, fmt.Errorf("%s and another part of the base both have %s", c, name)
-			default:
-				base[name] = part[name]
+		for _, p := range c.Parts() {
+			if p.Base == nil {
+				continue
+			}
+			part := map[string][]byte{}
+			if err := read(p.Base, ".", part); err != nil {
+				return nil, fmt.Errorf("reading %s: %w", c, err)
+			}
+			if err := add(base, part, c); err != nil {
+				return nil, err
 			}
 		}
 	}
 	return base, nil
+}
+
+// add adds part, a part of c's base, to base: a section file to the one already there, any other
+// file only when no other part has it.
+func add(base, part map[string][]byte, c component.Component) error {
+	for _, name := range slices.Sorted(maps.Keys(part)) {
+		existing, taken := base[name]
+		switch {
+		case slices.Contains(sections, name) && taken:
+			base[name] = slices.Concat(bytes.TrimRight(existing, "\n"), []byte("\n\n"), part[name])
+		case taken:
+			// Two sources of one file would leave one of them silently unused.
+			return fmt.Errorf("%s and another part of the base both have %s", c, name)
+		default:
+			base[name] = part[name]
+		}
+	}
+	return nil
 }
 
 // Install writes the base of a project on forge with components installed into dir's
@@ -90,17 +102,19 @@ func Skeleton(dir string) ([]string, error) {
 	return writeOnce(dir, files, "files/skeleton")
 }
 
-// ComponentSkeleton writes into dir each file c gives a project that is not there yet, and
-// returns the paths it wrote. Like the project's own skeleton, they are the project's from then on.
-// A file named *.tmpl is a template, rendered with the answers c was added with and written without
-// its .tmpl: Go source is kept as one, so wf's own build never compiles a project's code.
+// ComponentSkeleton writes into dir each file c, added with answers, gives a project that is not
+// there yet, and returns the paths it wrote. Like the project's own skeleton, they are the
+// project's from then on. A file named *.tmpl is a template, rendered with answers and written
+// without its .tmpl: Go source is kept as one, so wf's own build never compiles a project's code.
 func ComponentSkeleton(dir string, c component.Component, answers map[string]any) ([]string, error) {
-	if c.Skeleton == nil {
-		return nil, nil
-	}
 	skeleton := map[string][]byte{}
-	if err := read(c.Skeleton, ".", skeleton); err != nil {
-		return nil, fmt.Errorf("reading %s: %w", c, err)
+	for _, part := range c.With(answers).Parts() {
+		if part.Skeleton == nil {
+			continue
+		}
+		if err := readOnce(part.Skeleton, skeleton); err != nil {
+			return nil, fmt.Errorf("reading %s: %w", c, err)
+		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(skeleton)) {
 		target, isTemplate := strings.CutSuffix(name, ".tmpl")
@@ -207,6 +221,22 @@ func Check(dir string, config project.Config, components []component.Component, 
 		}
 	}
 	return differences, nil
+}
+
+// readOnce adds every file in fsys to into, failing on one into has already: two parts of one
+// component with the same file would leave one of them silently unused.
+func readOnce(fsys fs.FS, into map[string][]byte) error {
+	part := map[string][]byte{}
+	if err := read(fsys, ".", part); err != nil {
+		return err
+	}
+	for name, content := range part {
+		if _, taken := into[name]; taken {
+			return fmt.Errorf("two of its parts both have %s", name)
+		}
+		into[name] = content
+	}
+	return nil
 }
 
 // read adds every file under root in fsys to into, by its path under root.

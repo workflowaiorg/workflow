@@ -1,0 +1,16 @@
+// Package postgres opens a service's pool of connections to PostgreSQL, through bun.
+package postgres
+
+import (
+	"database/sql"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+)
+
+// Open returns a pool of connections to the database at dsn. It connects on the first query, not
+// here, so a service starts even while its database is still starting.
+func Open(dsn string) *bun.DB {
+	return bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
+}
