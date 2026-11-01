@@ -18,9 +18,9 @@ import (
 )
 
 // files holds base/, the backend's part of .agents/base, and skeleton/, what a project is given
-// once: go.mod, pkg/ and a first service.
+// once: go.mod, pkg/ and a first service; postgres/ holds the same two for the postgres option.
 //
-//go:embed all:base all:skeleton
+//go:embed all:base all:skeleton all:postgres
 var files embed.FS
 
 // Component is the backend, as wf add backend installs it.
@@ -29,17 +29,23 @@ var Component = component.Component{
 	Summary: "A Go backend of services: shared packages, a first service, and the skills to build more",
 	Options: []component.Option{
 		{Name: "module", Question: "The Go module path, such as github.com/acme/shop"},
+		{
+			Name: "postgres", Question: "Keep data in PostgreSQL", Bool: true, Default: "false",
+			Part: component.Part{Base: sub("postgres/base"), Skeleton: sub("postgres/skeleton")},
+		},
 	},
-	Base:     sub("base"),
-	Skeleton: sub("skeleton"),
-	Gate: []project.GateStep{
-		{Name: "go format", Paths: []string{"**/*.go"}, Run: `test -z "$(gofmt -l .)"`},
-		{Name: "go vet", Paths: []string{"**/*.go", "go.mod", "go.sum"}, Run: "go vet ./..."},
-		{Name: "go test", Paths: []string{"**/*.go", "go.mod", "go.sum"}, Run: "go test ./..."},
-	},
-	Doctor: []project.Check{
-		{Name: "go installed", Run: "go version"},
-		{Name: "docker running", Run: "docker info >/dev/null"},
+	Part: component.Part{
+		Base:     sub("base"),
+		Skeleton: sub("skeleton"),
+		Gate: []project.GateStep{
+			{Name: "go format", Paths: []string{"**/*.go"}, Run: `test -z "$(gofmt -l .)"`},
+			{Name: "go vet", Paths: []string{"**/*.go", "go.mod", "go.sum"}, Run: "go vet ./..."},
+			{Name: "go test", Paths: []string{"**/*.go", "go.mod", "go.sum"}, Run: "go test ./..."},
+		},
+		Doctor: []project.Check{
+			{Name: "go installed", Run: "go version"},
+			{Name: "docker running", Run: "docker info >/dev/null"},
+		},
 	},
 	Check: checkModule,
 	Edits: func(map[string]any) []string {

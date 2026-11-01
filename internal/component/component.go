@@ -13,13 +13,8 @@ import (
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
-// Component is one capability wf add installs.
-type Component struct {
-	// Name is how the project names it: wf add <name>.
-	Name    string
-	Summary string
-	// Options are the questions wf add asks, each also a flag of wf add.
-	Options []Option
+// Part is what a component, or one of its options, brings to a project.
+type Part struct {
 	// Base holds its part of .agents/base, in the same layout. Its AGENTS.md and workflow/GUIDE.md
 	// are added to wf's as a section of their own; any other file is its alone.
 	Base fs.FS
@@ -29,6 +24,19 @@ type Component struct {
 	Gate []project.GateStep
 	// Doctor holds its checks for wf doctor, which run before the project's own.
 	Doctor []project.Check
+}
+
+// Component is one capability wf add installs.
+type Component struct {
+	// Name is how the project names it: wf add <name>.
+	Name    string
+	Summary string
+	// Options are the questions wf add asks, each also a flag of wf add.
+	Options []Option
+	// Part is what the component brings whatever the answers.
+	Part
+	// chosen holds the parts of the options answered yes, set by With.
+	chosen []Part
 	// Check, when set, checks the answers against the project before wf add writes anything, so a
 	// wrong answer is not written into files the project then owns.
 	Check func(dir string, answers map[string]any) error
@@ -48,6 +56,25 @@ type Option struct {
 	Default string
 	// Choices, when set, are the only answers accepted.
 	Choices []string
+	// Part, for a Bool option, is what the component brings only when the answer is yes: what is
+	// not chosen does not exist in the project.
+	Part
+}
+
+// With returns c as added with answers: its own part, and the part of each option answered yes.
+func (c Component) With(answers map[string]any) Component {
+	c.chosen = nil
+	for _, option := range c.Options {
+		if yes, _ := answers[option.Name].(bool); option.Bool && yes {
+			c.chosen = append(c.chosen, option.Part)
+		}
+	}
+	return c
+}
+
+// Parts returns what c brings: its own part, then the part of each option With chose.
+func (c Component) Parts() []Part {
+	return append([]Part{c.Part}, c.chosen...)
 }
 
 // Installed returns the components config records, sorted by name, from known. A name wf does not
@@ -63,7 +90,7 @@ func Installed(config project.Config, known []Component) ([]Component, error) {
 		if problems := c.answerProblems(config.Components[name]); len(problems) > 0 {
 			return nil, project.UserErrorf("%s: %s", project.ConfigFile, strings.Join(problems, "; "))
 		}
-		installed = append(installed, c)
+		installed = append(installed, c.With(config.Components[name]))
 	}
 	return installed, nil
 }
@@ -142,7 +169,9 @@ func (option Option) Answer(answer string) (any, error) {
 func Gate(components []Component) []project.GateStep {
 	var gate []project.GateStep
 	for _, c := range components {
-		gate = append(gate, c.Gate...)
+		for _, part := range c.Parts() {
+			gate = append(gate, part.Gate...)
+		}
 	}
 	return gate
 }
@@ -151,7 +180,9 @@ func Gate(components []Component) []project.GateStep {
 func Doctor(components []Component) []project.Check {
 	var checks []project.Check
 	for _, c := range components {
-		checks = append(checks, c.Doctor...)
+		for _, part := range c.Parts() {
+			checks = append(checks, part.Doctor...)
+		}
 	}
 	return checks
 }

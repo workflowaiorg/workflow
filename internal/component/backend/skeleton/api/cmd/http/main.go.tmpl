@@ -35,6 +35,11 @@ func main() {
 	}
 
 	serve(r, cfg.Port)
+[[- if .postgres ]]
+	if err := application.DB.Close(); err != nil {
+		logging.Error(context.Background(), "closing the database", "error", err)
+	}
+[[- end ]]
 }
 
 // serve answers on port until SIGINT or SIGTERM, then gives the requests in flight five seconds

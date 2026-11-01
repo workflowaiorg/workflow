@@ -40,7 +40,8 @@ The order never changes:
 1. `logging.Init()`.
 2. `cfg := config.Load()`, then check every required setting and `os.Exit(1)` with a message naming
    the variable when one is missing.
-3. `app.New(cfg)`: open what is opened once, such as a database pool, and defer its close.
+3. `app.New(cfg)`: open what is opened once, such as a database pool;
+   `main` closes it once the server has stopped.
 4. `gin.New()` (never `gin.Default()`), with `gin.Recovery()` and `middleware.CorrelationID()`, and
    `SetTrustedProxies` set explicitly.
 5. Register each domain's routes; a registration that returns an error is logged and exits 1.

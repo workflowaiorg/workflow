@@ -2,6 +2,7 @@ package backend_test
 
 import (
 	"bytes"
+	"fmt"
 	"go/format"
 	"io/fs"
 	"os"
@@ -13,18 +14,26 @@ import (
 	"github.com/workflowaiorg/workflow/internal/component/backend"
 )
 
-// written renders the backend's skeleton for the module example.com/shop into a new directory.
-func written(t *testing.T) string {
+// written renders the backend's skeleton for the module example.com/shop into a new directory,
+// with postgres or without.
+func written(t *testing.T, postgres bool) string {
 	t.Helper()
 	dir := t.TempDir()
-	if _, err := base.ComponentSkeleton(dir, backend.Component, map[string]any{"module": "example.com/shop"}); err != nil {
+	if _, err := base.ComponentSkeleton(dir, backend.Component, map[string]any{"module": "example.com/shop", "postgres": postgres}); err != nil {
 		t.Fatal(err)
 	}
 	return dir
 }
 
 func TestTheSkeletonIsGoInTheProjectsModule(t *testing.T) {
-	dir := written(t)
+	for _, postgres := range []bool{false, true} {
+		t.Run(fmt.Sprintf("postgres %v", postgres), func(t *testing.T) { checkSkeleton(t, written(t, postgres)) })
+	}
+}
+
+// checkSkeleton checks that the skeleton written into dir is rendered, gofmt-formatted Go in the
+// module example.com/shop.
+func checkSkeleton(t *testing.T, dir string) {
 	goMod, err := os.ReadFile(filepath.Join(dir, "go.mod"))
 	if err != nil || !strings.HasPrefix(string(goMod), "module example.com/shop\n") {
 		t.Fatalf("go.mod = %q, %v; want module example.com/shop", goMod, err)
@@ -64,7 +73,7 @@ func TestTheSkeletonIsGoInTheProjectsModule(t *testing.T) {
 }
 
 func TestTheFirstServiceIsInTheStack(t *testing.T) {
-	compose, err := os.ReadFile(filepath.Join(written(t), "docker-compose.yaml"))
+	compose, err := os.ReadFile(filepath.Join(written(t, false), "docker-compose.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,5 +118,48 @@ func TestTheModuleIsChecked(t *testing.T) {
 				t.Errorf("Check(%q) = %v, want it to say %q", test.module, err, test.want)
 			}
 		})
+	}
+}
+
+func TestPostgresExistsOnlyWhenChosen(t *testing.T) {
+	for _, postgres := range []bool{false, true} {
+		dir := written(t, postgres)
+		_, err := os.Stat(filepath.Join(dir, "pkg/postgres/postgres.go"))
+		if (err == nil) != postgres {
+			t.Errorf("with postgres %v, pkg/postgres exists = %v", postgres, err == nil)
+		}
+		// What each file holds of the database, when it is chosen.
+		marks := map[string]string{
+			"docker-compose.yaml":           "postgres",
+			"api/internal/app/app.go":       "postgres.Open",
+			"api/internal/config/config.go": "PostgresDSN",
+			"api/cmd/http/main.go":          "DB.Close",
+		}
+		for name, mark := range marks {
+			content, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(content), mark); got != postgres {
+				t.Errorf("with postgres %v, %s holds %s = %v:\n%s", postgres, name, mark, got, content)
+			}
+		}
+	}
+}
+
+func TestPostgresComesUpBeforeTheService(t *testing.T) {
+	compose, err := os.ReadFile(filepath.Join(written(t, true), "docker-compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"    depends_on:\n      migrate:\n        condition: service_completed_successfully\n\n  postgres:\n",
+		"    depends_on:\n      postgres:\n        condition: service_healthy\n",
+		"github.com/pressly/goose/v3/cmd/goose@v3.27.0 up",
+		"  postgres-data:\n",
+	} {
+		if !strings.Contains(string(compose), want) {
+			t.Errorf("docker-compose.yaml does not hold %q:\n%s", want, compose)
+		}
 	}
 }

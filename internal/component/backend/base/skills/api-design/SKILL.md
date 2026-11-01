@@ -84,7 +84,7 @@ A call to another service. It implements the controller's interface, turns every
 ## Repository: `internal/repository/<domain>/<driver>/`
 
 The database, behind the controller's interface. It returns models and `APIError`s, never driver
-types or driver errors, and `New` returns it with a function that closes it.
+types or driver errors. `New` takes the connection it reads from; it does not open one.
 
 ## Route: `internal/route/<domain>.go`
 

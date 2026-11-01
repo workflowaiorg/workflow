@@ -303,6 +303,25 @@ It also brings:
 wf has no commands for the routine: the agent runs `go test`, `go mod tidy` and the rest itself, as
 the skills say. A new service is a copy of `api`, made as the `architecture` skill says.
 
+#### With PostgreSQL
+
+```sh
+wf add backend --module=github.com/acme/shop --postgres
+```
+
+`--postgres` is asked when you leave it out, and is no by default. Choose it when you add the
+backend: what you do not choose is not written at all. With it, the backend also has:
+
+| What | Where |
+|---|---|
+| the pool every service opens once, through [bun](https://bun.uptrace.dev) | `pkg/postgres/` |
+| the database's settings, `POSTGRES_*`, defaulting to the local stack's, and the pool on the `App` | `api/internal/config/`, `api/internal/app/` |
+| a `postgres` service, and a `migrate` service that applies the [goose](https://github.com/pressly/goose) migrations in `migrations/` before any service starts | `docker-compose.yaml` |
+| the `database` skill, and a database section in `AGENTS.md` | `.agents/base/` |
+
+`docker compose up -d` applies new migrations each time. `docker compose logs migrate` shows what it
+applied.
+
 ## Settings: .wf.yml
 
 ```yaml
@@ -334,6 +353,7 @@ doctor:
 components:
   backend:
     module: github.com/acme/shop
+    postgres: true
 ```
 
 - `wf` and `forge` are required. `wf sync`, `wf show` and `wf worktree` check every setting first,
@@ -345,7 +365,9 @@ components:
   that wf writes. A component's own steps come before yours.
 - `doctor:` is optional. A component's checks come before yours. A command YAML would read as
   something else, such as `false`, goes in quotes: `run: "false"`.
-- `components:` is written by `wf add`. To change an answer, edit it here and run `wf sync`.
+- `components:` is written by `wf add`. An answer the skills only quote can be edited here, then
+  `wf sync`. An option that adds files, such as the backend's `postgres`, is chosen when the
+  component is added: turning it on here adds none of them, and `wf sync --check` fails.
 
 ## Commands
 
