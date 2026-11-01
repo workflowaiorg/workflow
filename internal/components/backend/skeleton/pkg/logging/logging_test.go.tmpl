@@ -1,0 +1,35 @@
+package logging_test
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log/slog"
+	"testing"
+
+	"[[ .module ]]/pkg/logging"
+)
+
+func TestALogLineCarriesTheCorrelationID(t *testing.T) {
+	var out bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&out, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	ctx := logging.WithCorrelationID(context.Background(), "abc-123")
+	logging.Info(ctx, "order placed", "order_id", 7)
+
+	var line map[string]any
+	if err := json.Unmarshal(out.Bytes(), &line); err != nil {
+		t.Fatalf("the log line is not JSON: %v\n%s", err, out.String())
+	}
+	if line["correlation_id"] != "abc-123" || line["msg"] != "order placed" {
+		t.Errorf("log line = %v, want the message and correlation_id abc-123", line)
+	}
+}
+
+func TestNoCorrelationIDWithoutOne(t *testing.T) {
+	if got := logging.CorrelationID(context.Background()); got != "" {
+		t.Errorf("CorrelationID = %q, want none", got)
+	}
+}

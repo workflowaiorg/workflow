@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/workflowaiorg/workflow/internal/cli"
 	"github.com/workflowaiorg/workflow/internal/component"
+	"github.com/workflowaiorg/workflow/internal/components"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -264,9 +266,46 @@ func TestAddListsAComponentsOptions(t *testing.T) {
 func TestNoComponentIsNamedLikeACommand(t *testing.T) {
 	// wf runs its own command first, so a component named like one would lose its commands.
 	_, stdout, _ := run(t, "help")
-	for _, c := range component.All {
+	for _, c := range components.All {
 		if strings.Contains(stdout, "wf "+c.Name+" ") {
 			t.Errorf("the %s component is named like a wf command", c.Name)
+		}
+	}
+}
+
+// TestAProjectWithTheBackendBuildsAndPasses adds the backend to a new project, then downloads the
+// modules its code imports and runs go vet and go test there, as a developer would. It needs the
+// network, so -short skips it.
+func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
+	if testing.Short() {
+		t.Skip("downloads modules")
+	}
+	dir := t.TempDir()
+	app := cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
+	if code, _, stderr := runWith(t, app, "init", "--forge=gitlab"); code != 0 {
+		t.Fatalf("wf init exited %d: %s", code, stderr)
+	}
+	app = cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
+	code, _, stderr := runWith(t, app, "add", "backend", "--module=example.com/shop")
+	if code != 0 {
+		t.Fatalf("wf add backend exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "by hand  run go mod tidy") {
+		t.Errorf("wf add backend does not say to run go mod tidy:\n%s", stderr)
+	}
+	for _, skill := range []string{"architecture", "api-design", "configuration", "error-handling", "shared-packages", "testing", "go-style"} {
+		if _, err := os.Stat(filepath.Join(dir, ".claude/skills", skill, "SKILL.md")); err != nil {
+			t.Errorf("the %s skill was not installed: %v", skill, err)
+		}
+	}
+
+	t.Setenv("GOWORK", "off")
+	t.Setenv("GOFLAGS", "")
+	for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {
+		command := exec.Command("go", args...)
+		command.Dir = dir
+		if out, err := command.CombinedOutput(); err != nil {
+			t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
 		}
 	}
 }

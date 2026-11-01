@@ -82,6 +82,11 @@ func runAdd(app *App, args []string) error {
 		}
 	}
 
+	if c.Check != nil {
+		if err := c.Check(app.dir, answers); err != nil {
+			return err
+		}
+	}
 	configFile, err := project.WithComponent(app.dir, name, answers)
 	if err != nil {
 		return err
@@ -92,7 +97,7 @@ func runAdd(app *App, args []string) error {
 		return err
 	}
 	fmt.Fprintln(app.stdout, "wrote    "+project.BaseDir+"/")
-	written, err := base.ComponentSkeleton(app.dir, c)
+	written, err := base.ComponentSkeleton(app.dir, c, answers)
 	if err != nil {
 		return err
 	}
@@ -135,7 +140,11 @@ func (app *App) componentUsage(c component.Component) error {
 		case len(option.Choices) > 0:
 			takes = strings.Join(option.Choices, ", ") + "; "
 		}
-		fmt.Fprintf(table, "  %s\t%s (%sdefault %s)\n", flag, option.Question, takes, option.Default)
+		fallback := "no default"
+		if option.Default != "" {
+			fallback = "default " + option.Default
+		}
+		fmt.Fprintf(table, "  %s\t%s (%s%s)\n", flag, option.Question, takes, fallback)
 	}
 	if err := table.Flush(); err != nil {
 		return err

@@ -32,6 +32,9 @@ type Component struct {
 	Doctor []project.Check
 	// Commands are run as wf <name> <command>.
 	Commands []Command
+	// Check, when set, checks the answers against the project before wf add writes anything, so a
+	// wrong answer is not written into files the project then owns.
+	Check func(dir string, answers map[string]any) error
 	// Edits says what the developer should change by hand in files the project owns. wf never
 	// edits them itself.
 	Edits func(answers map[string]any) []string
@@ -66,9 +69,6 @@ type Context struct {
 	Stdout  io.Writer
 	Stderr  io.Writer
 }
-
-// All are the components wf carries.
-var All []Component
 
 // Installed returns the components config records, sorted by name, from known. A name wf does not
 // know is the developer's mistake.

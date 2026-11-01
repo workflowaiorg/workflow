@@ -1,0 +1,35 @@
+// Package http serves the health domain over HTTP.
+package http
+
+import (
+	"context"
+
+	"github.com/gin-gonic/gin"
+
+	"[[ .module ]]/pkg/httputil"
+)
+
+// Controller is what the handler needs of the health controller.
+type Controller interface {
+	Status(ctx context.Context) (string, error)
+}
+
+// Handler answers the health routes.
+type Handler struct {
+	ctrl Controller
+}
+
+// New returns the Handler that asks ctrl.
+func New(ctrl Controller) *Handler {
+	return &Handler{ctrl: ctrl}
+}
+
+// Show answers GET /health.
+func (h *Handler) Show(c *gin.Context) {
+	status, err := h.ctrl.Status(c.Request.Context())
+	if err != nil {
+		httputil.RespondWithError(c, err)
+		return
+	}
+	httputil.Success(c, statusResponse{Status: status})
+}

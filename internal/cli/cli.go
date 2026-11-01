@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/workflowaiorg/workflow/internal/component"
+	"github.com/workflowaiorg/workflow/internal/components"
 	"github.com/workflowaiorg/workflow/internal/launcher"
 	"github.com/workflowaiorg/workflow/internal/project"
 	"github.com/workflowaiorg/workflow/internal/stack"
@@ -66,7 +67,7 @@ type App struct {
 // New returns wf's command line, reporting version, working on the project at dir, reading answers
 // from stdin and writing to stdout and stderr. wf asks a question only when stdin is a terminal.
 func New(version, dir string, stdin io.Reader, stdout, stderr io.Writer) *App {
-	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, components: component.All, now: time.Now, releases: launcher.ReleasesURL}
+	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, components: components.All, now: time.Now, releases: launcher.ReleasesURL}
 	app.commands = []Command{
 		{Name: "init", Usage: "wf init [--forge <forge>]", Summary: "Start using wf in this project: .wf.yml, the base, and every assistant's files", run: runInit},
 		{Name: "add", Usage: "wf add [<component>] [--<option> …] [--force]", Summary: "Add a component to the project; with no component, list them", run: runAdd},

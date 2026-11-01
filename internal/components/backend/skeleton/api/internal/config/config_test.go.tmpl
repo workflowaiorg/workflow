@@ -1,0 +1,18 @@
+package config_test
+
+import (
+	"testing"
+
+	"[[ .module ]]/api/internal/config"
+)
+
+func TestLoad(t *testing.T) {
+	t.Setenv("PORT", "")
+	if got := config.Load().Port; got != "8000" {
+		t.Errorf("Port with no PORT = %q, want 8000", got)
+	}
+	t.Setenv("PORT", "9000")
+	if got := config.Load().Port; got != "9000" {
+		t.Errorf("Port with PORT=9000 = %q, want 9000", got)
+	}
+}

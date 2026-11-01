@@ -1,0 +1,52 @@
+package http_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+
+	healthhttp "[[ .module ]]/api/internal/handler/health/http"
+	"[[ .module ]]/pkg/errors"
+)
+
+// controller is a hand-written stand-in for the health controller.
+type controller struct {
+	status string
+	err    error
+}
+
+func (c controller) Status(context.Context) (string, error) { return c.status, c.err }
+
+func TestShow(t *testing.T) {
+	tests := []struct {
+		name   string
+		ctrl   controller
+		status int
+		body   string
+	}{
+		{name: "healthy", ctrl: controller{status: "ok"}, status: http.StatusOK, body: `{"data":{"status":"ok"}}`},
+		{
+			name:   "unhealthy",
+			ctrl:   controller{err: errors.New(errors.CodeUnavailable, "Not ready", nil)},
+			status: http.StatusServiceUnavailable,
+			body:   `{"error":{"code":"SERVICE_UNAVAILABLE","message":"Not ready"}}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			r.GET("/health", healthhttp.New(test.ctrl).Show)
+
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/health", nil))
+
+			assert.Equal(t, test.status, w.Code)
+			assert.JSONEq(t, test.body, w.Body.String())
+		})
+	}
+}

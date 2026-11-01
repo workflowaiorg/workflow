@@ -1,0 +1,47 @@
+// Package logging is how every service logs: JSON lines on stdout, each carrying the request's
+// correlation ID when its context has one.
+package logging
+
+import (
+	"context"
+	"log/slog"
+	"os"
+)
+
+type correlationKey struct{}
+
+// Init makes the default logger write JSON. Every main calls it first.
+func Init() {
+	slog.SetDefault(slog.New(slog.NewJSONHandler(os.Stdout, nil)))
+}
+
+// WithCorrelationID returns a copy of ctx carrying the correlation ID.
+func WithCorrelationID(ctx context.Context, correlationID string) context.Context {
+	return context.WithValue(ctx, correlationKey{}, correlationID)
+}
+
+// CorrelationID returns the correlation ID ctx carries, or "" when it has none.
+func CorrelationID(ctx context.Context) string {
+	correlationID, _ := ctx.Value(correlationKey{}).(string)
+	return correlationID
+}
+
+// FromContext returns the default logger, with the correlation ID of ctx when it has one.
+func FromContext(ctx context.Context) *slog.Logger {
+	if correlationID := CorrelationID(ctx); correlationID != "" {
+		return slog.Default().With(slog.String("correlation_id", correlationID))
+	}
+	return slog.Default()
+}
+
+// Debug logs msg with args.
+func Debug(ctx context.Context, msg string, args ...any) { FromContext(ctx).Debug(msg, args...) }
+
+// Info logs msg with args.
+func Info(ctx context.Context, msg string, args ...any) { FromContext(ctx).Info(msg, args...) }
+
+// Warn logs msg with args.
+func Warn(ctx context.Context, msg string, args ...any) { FromContext(ctx).Warn(msg, args...) }
+
+// Error logs msg with args.
+func Error(ctx context.Context, msg string, args ...any) { FromContext(ctx).Error(msg, args...) }

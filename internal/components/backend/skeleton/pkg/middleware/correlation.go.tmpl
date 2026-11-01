@@ -1,0 +1,26 @@
+// Package middleware holds the Gin middleware every service uses.
+package middleware
+
+import (
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+
+	"[[ .module ]]/pkg/logging"
+)
+
+// CorrelationIDHeader carries a request's correlation ID from service to service.
+const CorrelationIDHeader = "X-Request-ID"
+
+// CorrelationID gives each request the correlation ID it came with, or a new one, in its context
+// and in the response's header, so every log line of one request can be found together.
+func CorrelationID() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		correlationID := c.GetHeader(CorrelationIDHeader)
+		if correlationID == "" {
+			correlationID = uuid.NewString()
+		}
+		c.Header(CorrelationIDHeader, correlationID)
+		c.Request = c.Request.WithContext(logging.WithCorrelationID(c.Request.Context(), correlationID))
+		c.Next()
+	}
+}

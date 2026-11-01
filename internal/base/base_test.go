@@ -169,3 +169,63 @@ func TestFilesAddsEachComponentsPart(t *testing.T) {
 		t.Errorf("Files with two components owning one file = %v, want an error naming it", err)
 	}
 }
+
+func TestComponentSkeletonRendersItsTemplates(t *testing.T) {
+	skeleton := component.Component{Name: "sample", Skeleton: fstest.MapFS{
+		"go.mod.tmpl":  {Data: []byte("module [[ .module ]]\n")},
+		"main.go.tmpl": {Data: []byte("package main\n\nimport _ \"[[ .module ]]/pkg\"\n")},
+		"README.md":    {Data: []byte("Written as it is: [[ not a template ]]\n")},
+		"kept.txt":     {Data: []byte("wf's\n")},
+		"kept.go.tmpl": {Data: []byte("package kept // wf's\n")},
+	}}
+	dir := t.TempDir()
+	for name, content := range map[string]string{"kept.txt": "the project's\n", "kept.go": "package kept // the project's\n"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	written, err := base.ComponentSkeleton(dir, skeleton, map[string]any{"module": "example.com/shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"README.md", "go.mod", "main.go"}; !slices.Equal(written, want) {
+		t.Errorf("wrote %v, want %v", written, want)
+	}
+	for name, want := range map[string]string{
+		"go.mod":    "module example.com/shop\n",
+		"main.go":   "package main\n\nimport _ \"example.com/shop/pkg\"\n",
+		"README.md": "Written as it is: [[ not a template ]]\n",
+		"kept.txt":  "the project's\n",
+		"kept.go":   "package kept // the project's\n",
+	} {
+		content, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || string(content) != want {
+			t.Errorf("%s = %q, %v; want %q", name, content, err, want)
+		}
+	}
+}
+
+func TestComponentSkeletonRefusesABrokenTemplate(t *testing.T) {
+	tests := []struct {
+		name     string
+		template string
+		want     string
+	}{
+		{name: "an answer it was not given", template: "[[ .missing ]]", want: `map has no entry for key "missing"`},
+		{name: "a template that does not parse", template: "[[ .module ", want: "reading the sample component's broken.tmpl"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			skeleton := component.Component{Name: "sample", Skeleton: fstest.MapFS{"broken.tmpl": {Data: []byte(test.template)}}}
+			dir := t.TempDir()
+			_, err := base.ComponentSkeleton(dir, skeleton, map[string]any{"module": "example.com/shop"})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Errorf("ComponentSkeleton = %v, want it to say %q", err, test.want)
+			}
+			if entries, _ := os.ReadDir(dir); len(entries) > 0 {
+				t.Errorf("a broken template still wrote %d files", len(entries))
+			}
+		})
+	}
+}

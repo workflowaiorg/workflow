@@ -1,0 +1,15 @@
+// Package app holds what the service's routes share: its settings, and any connection opened once
+// at start.
+package app
+
+import "[[ .module ]]/api/internal/config"
+
+// App is the service's shared state, handed to each route.
+type App struct {
+	Config *config.Config
+}
+
+// New returns the App of a service started with cfg.
+func New(cfg *config.Config) *App {
+	return &App{Config: cfg}
+}
