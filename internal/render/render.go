@@ -221,19 +221,11 @@ func renderTemplate(name string, content []byte, data map[string]any, funcs temp
 }
 
 // templateFuncs are what base files use besides .wf.yml's keys: gate, every step of
-// /pre-mr-check's gate, the components' before the project's own; and commands <component>, the
-// commands an installed component adds to wf.
+// /pre-mr-check's gate, the components' before the project's own.
 func templateFuncs(config project.Config, components []component.Component) template.FuncMap {
 	return template.FuncMap{
 		"gate": func() []project.GateStep {
 			return slices.Concat(component.Gate(components), config.Gate)
-		},
-		"commands": func(name string) ([]component.Command, error) {
-			index := slices.IndexFunc(components, func(c component.Component) bool { return c.Name == name })
-			if index < 0 {
-				return nil, fmt.Errorf("no installed component %q", name)
-			}
-			return components[index].Commands, nil
 		},
 	}
 }

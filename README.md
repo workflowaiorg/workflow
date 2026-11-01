@@ -252,7 +252,7 @@ check that waits for a service should retry on its own, as the `curl --retry` ex
 
 A component adds one capability to the project, such as a backend or a frontend. It brings its own
 skills, commands and sections of `AGENTS.md` and the guide; its own steps in `/pre-mr-check`'s gate;
-its own checks in `wf doctor`; and its own wf commands, which start with its name: `wf <component> <command>`.
+and its own checks in `wf doctor`.
 
 ```sh
 wf add                    # list the components wf carries
@@ -372,10 +372,6 @@ Starts using wf in a project. See [Start in a project](#start-in-a-project).
 Adds a component; with no component, lists them. `wf add <component> -h` lists its options and
 the flag for each. See [Components](#components). `--force` is
 passed on to its `wf sync`.
-
-### `wf <component> <command>`
-
-Runs a command of an installed component. `wf <component> -h` lists them, and so does `wf help`.
 
 ### `wf lock`
 

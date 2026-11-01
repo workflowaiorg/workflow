@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/workflowaiorg/workflow/internal/base"
-	"github.com/workflowaiorg/workflow/internal/components/backend"
+	"github.com/workflowaiorg/workflow/internal/component/backend"
 )
 
 // written renders the backend's skeleton for the module example.com/shop into a new directory.

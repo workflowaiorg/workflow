@@ -2,7 +2,6 @@ package cli_test
 
 import (
 	"bytes"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,7 +11,6 @@ import (
 
 	"github.com/workflowaiorg/workflow/internal/cli"
 	"github.com/workflowaiorg/workflow/internal/component"
-	"github.com/workflowaiorg/workflow/internal/components"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -27,18 +25,11 @@ var sample = component.Component{
 	Base: fstest.MapFS{
 		"AGENTS.md": {Data: []byte("## Sample\n\nThe sample component's rules.\n")},
 		"skills/sample/SKILL.md": {Data: []byte("---\nname: sample\ndescription: \"Using the sample component\"\n---\n\n" +
-			"Database: [[ .components.sample.db ]].\n[[ range commands \"sample\" ]]\n- `[[ .Usage ]]`: [[ .Summary ]][[ end ]]\n")},
+			"Database: [[ .components.sample.db ]].\n")},
 	},
 	Skeleton: fstest.MapFS{"sample/config.txt": {Data: []byte("the project's own\n")}},
-	Gate:     []project.GateStep{{Name: "sample test", Paths: []string{"sample/**"}, Run: "wf sample hello"}},
+	Gate:     []project.GateStep{{Name: "sample test", Paths: []string{"sample/**"}, Run: "sample-test"}},
 	Doctor:   []project.Check{{Name: "sample tool installed", Run: "true"}},
-	Commands: []component.Command{{
-		Name: "hello", Usage: "wf sample hello", Summary: "Say hello from the database",
-		Run: func(ctx component.Context, args []string) error {
-			_, err := fmt.Fprintf(ctx.Stdout, "hello from %s\n", ctx.Answers["db"])
-			return err
-		},
-	}},
 	Edits: func(answers map[string]any) []string {
 		return []string{"add /sample/cache to .gitignore"}
 	},
@@ -85,10 +76,8 @@ func TestAddInstallsEveryPartOfAComponent(t *testing.T) {
 		t.Errorf(".wf.yml lost its comments:\n%s", config)
 	}
 	skill := read(t, dir, ".claude/skills/sample/SKILL.md")
-	for _, want := range []string{"Database: sqlite.", "- `wf sample hello`: Say hello from the database"} {
-		if !strings.Contains(skill, want) {
-			t.Errorf("the sample skill does not say %q:\n%s", want, skill)
-		}
+	if !strings.Contains(skill, "Database: sqlite.") {
+		t.Errorf("the sample skill does not hold its answer:\n%s", skill)
 	}
 	if agents := read(t, dir, "AGENTS.md"); !strings.Contains(agents, "## Sample\n\nThe sample component's rules.") {
 		t.Errorf("AGENTS.md has no section of the component's:\n%s", agents)
@@ -100,7 +89,7 @@ func TestAddInstallsEveryPartOfAComponent(t *testing.T) {
 	}
 	check := read(t, dir, ".claude/commands/pre-mr-check.md")
 	specs := strings.Index(check, "| specs and records |")
-	step := strings.Index(check, "| sample test | `sample/**` | `wf sample hello` |")
+	step := strings.Index(check, "| sample test | `sample/**` | `sample-test` |")
 	lint := strings.Index(check, "| lint |")
 	if specs < 0 || step < specs || lint < step {
 		t.Errorf("the gate table is not wf's steps, the component's, then the project's:\n%s", check)
@@ -112,12 +101,6 @@ func TestAddInstallsEveryPartOfAComponent(t *testing.T) {
 		t.Errorf("wf add printed (%q, %q), want the skeleton written and the edit left to the developer", stdout, stderr)
 	}
 
-	if code, stdout, stderr := runSample(t, dir, "sample", "hello"); code != 0 || stdout != "hello from sqlite\n" {
-		t.Errorf("wf sample hello = (%d, %q, %q), want the command run with its answers", code, stdout, stderr)
-	}
-	if _, stdout, _ := runSample(t, dir, "help"); !strings.Contains(stdout, "wf sample hello") {
-		t.Errorf("wf help does not list the component's command:\n%s", stdout)
-	}
 	if code, _, stderr := runSample(t, dir, "sync", "--check"); code != 0 {
 		t.Errorf("wf sync --check after wf add = (%d, %q), want it up to date", code, stderr)
 	}
@@ -166,26 +149,6 @@ func TestAddRefusesAComponentWhosePartIsTaken(t *testing.T) {
 	}
 }
 
-func TestAComponentWithNoCommandsSaysSo(t *testing.T) {
-	dir := initialised(t)
-	quiet := sample
-	quiet.Name = "quiet"
-	quiet.Options = nil
-	quiet.Base = nil
-	quiet.Skeleton = nil
-	quiet.Commands = nil
-	app := cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
-	app.SetComponents(quiet)
-	if code, _, stderr := runWith(t, app, "add", "quiet"); code != 0 {
-		t.Fatalf("wf add quiet exited %d: %s", code, stderr)
-	}
-	for _, args := range [][]string{{"quiet"}, {"quiet", "-h"}} {
-		if code, _, stderr := runWith(t, app, args...); code != 2 || !strings.Contains(stderr, "has no commands") {
-			t.Errorf("wf %s = (%d, %q), want exit 2 saying it has no commands", strings.Join(args, " "), code, stderr)
-		}
-	}
-}
-
 func TestAddRefusesComponentsItCannotAddTo(t *testing.T) {
 	dir := initialised(t)
 	config := read(t, dir, ".wf.yml") + "saved: &installed {}\ncomponents: *installed\n"
@@ -206,9 +169,6 @@ func TestAddRefusesComponentsItCannotAddTo(t *testing.T) {
 
 func TestComponentNamesAreChecked(t *testing.T) {
 	dir := initialised(t)
-	if code, _, stderr := runSample(t, dir, "sample", "hello"); code != 2 || !strings.Contains(stderr, "wf add sample installs it") {
-		t.Errorf("a command of a component not installed = (%d, %q), want exit 2 saying how to install it", code, stderr)
-	}
 	if code, _, stderr := runSample(t, dir, "add", "nothing"); code != 2 || !strings.Contains(stderr, "it knows sample") {
 		t.Errorf("wf add nothing = (%d, %q), want exit 2 naming what wf knows", code, stderr)
 	}
@@ -259,16 +219,6 @@ func TestAddListsAComponentsOptions(t *testing.T) {
 	for _, want := range []string{"usage: wf add sample", "--db=<answer>", "postgres, sqlite; default postgres", "--grpc", "yes or no; default false"} {
 		if code != 0 || !strings.Contains(stdout, want) {
 			t.Errorf("wf add sample -h = (%d, %q), want it to say %q", code, stdout, want)
-		}
-	}
-}
-
-func TestNoComponentIsNamedLikeACommand(t *testing.T) {
-	// wf runs its own command first, so a component named like one would lose its commands.
-	_, stdout, _ := run(t, "help")
-	for _, c := range components.All {
-		if strings.Contains(stdout, "wf "+c.Name+" ") {
-			t.Errorf("the %s component is named like a wf command", c.Name)
 		}
 	}
 }
