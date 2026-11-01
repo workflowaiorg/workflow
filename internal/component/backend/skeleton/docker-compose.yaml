@@ -1,5 +1,5 @@
-# The local stack: wf up starts it, wf down stops it. Each Go service is built from its source when
-# it starts, then exec'd, so the server itself gets the stop signal and drains its requests; the two
+# The local stack: docker compose up -d starts it, docker compose down stops it. Each Go service is
+# built from its source when it starts, then exec'd, so the server itself gets the stop signal and drains its requests; the two
 # volumes keep downloaded modules and builds between starts.
 services:
   api:

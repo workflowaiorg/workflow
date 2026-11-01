@@ -1,6 +1,6 @@
 ---
 name: architecture
-description: "How a backend service is laid out and started: its directories, its main(), the App container, graceful shutdown, where shared code lives, and how to add a new service."
+description: "How a backend service is laid out and started: its directories, its main(), the App container, graceful shutdown, where shared code lives, how to run the stack locally, and how to add a new service."
 ---
 
 # Skill: Service architecture
@@ -12,6 +12,7 @@ Every service is built the same way, so anyone who knows one knows them all.
 - Adding a new service
 - Changing a `cmd/` entrypoint, `internal/app/`, startup or shutdown
 - Deciding whether code belongs to one service or to `pkg/`
+- Starting, stopping or checking the app locally
 
 ## A service's layout
 
@@ -67,15 +68,25 @@ on it.
 Move code to the root `pkg/` only when a second service needs it, and then move it rather than
 copy it.
 
+## Running it
+
+The local stack is `docker-compose.yaml` at the project's root; run compose there.
+
+- Start: `docker compose up -d`. The first start compiles for a minute.
+- Check: `curl -sf --retry 30 --retry-all-errors http://localhost:8000/health` answers once `api`
+  has compiled; each service has its own host port.
+- Logs: `docker compose logs <service>`; add `-f` only in a terminal a person watches, since it
+  never returns.
+- Stop: `docker compose down`.
+
 ## A new service
 
 1. Copy `api/` to `<service>/` and replace `api` in its import paths.
 2. Keep `internal/config`, `internal/app`, the health route and `cmd/http/main.go`; remove the
    domains it does not have.
 3. Add it to `docker-compose.yaml`, as `api` is, with a host port of its own.
-4. `go vet ./... && go test ./...`, then `wf up`, and check that its `/health` answers once it has
-   compiled: `curl -sf --retry 30 --retry-all-errors http://localhost:<port>/health`. (`wf up` with
-   a service named stays attached to its logs, so an agent uses `wf up` alone.)
+4. `go vet ./... && go test ./...`, then `docker compose up -d`, and check that its `/health`
+   answers on its port, as *Running it* says.
 
 ## Definition of done
 

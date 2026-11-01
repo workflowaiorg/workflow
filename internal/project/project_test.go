@@ -52,13 +52,13 @@ func TestLoadNamesEveryMistakeAtOnce(t *testing.T) {
 }
 
 func TestLoadReadsTheDoctorChecks(t *testing.T) {
-	config, err := load(t, "wf: 0.1.0\nforge: gitlab\ndoctor:\n  - name: env\n    run: test -f .env\n    fix: cp .env.example .env\n  - name: api answers\n    run: curl -sf localhost:8000\n    when: up\n")
+	config, err := load(t, "wf: 0.1.0\nforge: gitlab\ndoctor:\n  - name: env\n    run: test -f .env\n    fix: cp .env.example .env\n  - name: api answers\n    run: curl -sf localhost:8000\n")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []project.Check{
 		{Name: "env", Run: "test -f .env", Fix: "cp .env.example .env"},
-		{Name: "api answers", Run: "curl -sf localhost:8000", WhenUp: true},
+		{Name: "api answers", Run: "curl -sf localhost:8000"},
 	}
 	if !slices.Equal(config.Doctor, want) {
 		t.Errorf("Load doctor = %+v, want %+v", config.Doctor, want)
@@ -66,12 +66,12 @@ func TestLoadReadsTheDoctorChecks(t *testing.T) {
 }
 
 func TestLoadNamesEveryMistakeInDoctor(t *testing.T) {
-	_, err := load(t, "wf: 0.1.0\nforge: gitlab\ndoctor:\n  - name: env\n    fix: [cp]\n    when: down\n    then: x\n  - name: off\n    run: false\n  - run: x\n")
+	_, err := load(t, "wf: 0.1.0\nforge: gitlab\ndoctor:\n  - name: env\n    fix: [cp]\n    when: up\n    then: x\n  - name: off\n    run: false\n  - run: x\n")
 	var mistake *project.UserError
 	if !errors.As(err, &mistake) {
 		t.Fatalf("Load = %v, want a UserError", err)
 	}
-	for _, want := range []string{"doctor[0] (env) needs run:", "has a fix: that is not a command", "has a when: other than up", "has then:", "doctor[1] (off) has a run: that YAML does not read as text", "doctor[2] needs name:"} {
+	for _, want := range []string{"doctor[0] (env) needs run:", "has a fix: that is not a command", "has when:, which is not name:, run: or fix:", "has then:", "doctor[1] (off) has a run: that YAML does not read as text", "doctor[2] needs name:"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load = %q, want it to say %q", err, want)
 		}

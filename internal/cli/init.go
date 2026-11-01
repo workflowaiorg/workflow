@@ -32,14 +32,11 @@ forge: %s
 #     run: golangci-lint run ./...
 
 # The project's own checks for wf doctor. A check passes when its command exits 0. fix: is what
-# wf scaffold runs when it fails; when: up runs it only while the stack is up.
+# wf scaffold runs when it fails.
 # doctor:
 #   - name: env file
 #     run: test -f .env
 #     fix: cp .env.example .env
-#   - name: api answers
-#     run: curl -sf --retry 10 --retry-connrefused http://localhost:8000/health
-#     when: up
 `
 
 func runInit(app *App, args []string) error {
