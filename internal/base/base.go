@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"text/template"
 
 	"github.com/workflowaiorg/workflow/internal/component"
 	"github.com/workflowaiorg/workflow/internal/project"
@@ -91,11 +92,33 @@ func Skeleton(dir string) ([]string, error) {
 
 // ComponentSkeleton writes into dir each file c gives a project that is not there yet, and
 // returns the paths it wrote. Like the project's own skeleton, they are the project's from then on.
-func ComponentSkeleton(dir string, c component.Component) ([]string, error) {
+// A file named *.tmpl is a template, rendered with the answers c was added with and written without
+// its .tmpl: Go source is kept as one, so wf's own build never compiles a project's code.
+func ComponentSkeleton(dir string, c component.Component, answers map[string]any) ([]string, error) {
 	if c.Skeleton == nil {
 		return nil, nil
 	}
-	return writeOnce(dir, c.Skeleton, ".")
+	skeleton := map[string][]byte{}
+	if err := read(c.Skeleton, ".", skeleton); err != nil {
+		return nil, fmt.Errorf("reading %s: %w", c, err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(skeleton)) {
+		target, isTemplate := strings.CutSuffix(name, ".tmpl")
+		if !isTemplate {
+			continue
+		}
+		tmpl, err := template.New(name).Delims("[[", "]]").Option("missingkey=error").Parse(string(skeleton[name]))
+		if err != nil {
+			return nil, fmt.Errorf("reading %s's %s: %w", c, name, err)
+		}
+		var out bytes.Buffer
+		if err := tmpl.Execute(&out, answers); err != nil {
+			return nil, fmt.Errorf("rendering %s's %s: %w", c, name, err)
+		}
+		delete(skeleton, name)
+		skeleton[target] = out.Bytes()
+	}
+	return writeFiles(dir, skeleton)
 }
 
 func writeOnce(dir string, fsys fs.FS, root string) ([]string, error) {
@@ -103,6 +126,12 @@ func writeOnce(dir string, fsys fs.FS, root string) ([]string, error) {
 	if err := read(fsys, root, skeleton); err != nil {
 		return nil, err
 	}
+	return writeFiles(dir, skeleton)
+}
+
+// writeFiles writes each of skeleton's files into dir that is not there yet, and returns the paths
+// it wrote.
+func writeFiles(dir string, skeleton map[string][]byte) ([]string, error) {
 	var written []string
 	for _, name := range slices.Sorted(maps.Keys(skeleton)) {
 		full := filepath.Join(dir, filepath.FromSlash(name))

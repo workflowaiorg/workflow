@@ -1,0 +1,24 @@
+// Package config is everything the service reads from its environment, read once at start.
+package config
+
+import "os"
+
+// Config is the service's settings.
+type Config struct {
+	// Port is the port the service listens on: PORT, or 8000.
+	Port string
+}
+
+// Load reads the settings from the environment. It is the only place the service reads it.
+func Load() *Config {
+	return &Config{
+		Port: getenv("PORT", "8000"),
+	}
+}
+
+func getenv(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}

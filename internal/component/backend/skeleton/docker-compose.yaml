@@ -1,0 +1,20 @@
+# The local stack: wf up starts it, wf down stops it. Each Go service is built from its source when
+# it starts, then exec'd, so the server itself gets the stop signal and drains its requests; the two
+# volumes keep downloaded modules and builds between starts.
+services:
+  api:
+    image: golang:1.25-alpine
+    working_dir: /app
+    command: ["sh", "-c", "go build -o /tmp/api ./api/cmd/http && exec /tmp/api"]
+    # Longer than the server's own five seconds to drain, whatever Docker's default is.
+    stop_grace_period: 10s
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+      - go-modules:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+
+volumes:
+  go-modules:
+  go-build:

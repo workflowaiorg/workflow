@@ -17,6 +17,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/workflowaiorg/workflow/internal/component"
+	"github.com/workflowaiorg/workflow/internal/component/backend"
 	"github.com/workflowaiorg/workflow/internal/launcher"
 	"github.com/workflowaiorg/workflow/internal/project"
 	"github.com/workflowaiorg/workflow/internal/stack"
@@ -66,7 +67,7 @@ type App struct {
 // New returns wf's command line, reporting version, working on the project at dir, reading answers
 // from stdin and writing to stdout and stderr. wf asks a question only when stdin is a terminal.
 func New(version, dir string, stdin io.Reader, stdout, stderr io.Writer) *App {
-	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, components: component.All, now: time.Now, releases: launcher.ReleasesURL}
+	app := &App{version: version, dir: dir, stdin: bufio.NewReader(stdin), interactive: isTerminal(stdin), stdout: stdout, stderr: stderr, components: []component.Component{backend.Component}, now: time.Now, releases: launcher.ReleasesURL}
 	app.commands = []Command{
 		{Name: "init", Usage: "wf init [--forge <forge>]", Summary: "Start using wf in this project: .wf.yml, the base, and every assistant's files", run: runInit},
 		{Name: "add", Usage: "wf add [<component>] [--<option> …] [--force]", Summary: "Add a component to the project; with no component, list them", run: runAdd},
@@ -95,13 +96,12 @@ func (app *App) Run(args []string) int {
 		name = "help"
 	}
 
-	run := func(app *App, args []string) error { return app.runComponent(name, args) }
-	if index := slices.IndexFunc(app.commands, func(command Command) bool { return command.Name == name }); index >= 0 {
-		run = app.commands[index].run
-	} else if !slices.ContainsFunc(app.components, func(c component.Component) bool { return c.Name == name }) {
+	index := slices.IndexFunc(app.commands, func(command Command) bool { return command.Name == name })
+	if index < 0 {
 		fmt.Fprintf(app.stderr, "wf: unknown command %q; run wf help\n", name)
 		return exitUsage
 	}
+	run := app.commands[index].run
 
 	if err := run(app, rest); err != nil {
 		if errors.Is(err, errHelpShown) {
@@ -191,30 +191,10 @@ func runHelp(app *App, args []string) error {
 func (app *App) writeHelp() error {
 	fmt.Fprintf(app.stdout, "wf %s — an AI-assisted engineering workflow for Go projects\n\nCommands:\n", app.version)
 	table := tabwriter.NewWriter(app.stdout, 0, 0, 3, ' ', 0)
-	for _, command := range app.allCommands() {
+	for _, command := range app.commands {
 		fmt.Fprintf(table, "  %s\t%s\n", command.Usage, command.Summary)
 	}
 	return table.Flush()
-}
-
-// allCommands returns wf's own commands, then those of the components the project in app.dir has
-// installed. A project whose settings cannot be read lists wf's own alone: help still helps there.
-func (app *App) allCommands() []Command {
-	commands := slices.Clone(app.commands)
-	config, err := project.Load(app.dir)
-	if err != nil {
-		return commands
-	}
-	installed, err := component.Installed(config, app.components)
-	if err != nil {
-		return commands
-	}
-	for _, c := range installed {
-		for _, command := range c.Commands {
-			commands = append(commands, Command{Name: c.Name + " " + command.Name, Usage: command.Usage, Summary: command.Summary})
-		}
-	}
-	return commands
 }
 
 // load reads the settings of the project in app.dir, and the components they install.
@@ -239,7 +219,7 @@ type helpJSON struct {
 func (app *App) writeHelpJSON() error {
 	encoder := json.NewEncoder(app.stdout)
 	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(helpJSON{Version: app.version, Commands: app.allCommands()}); err != nil {
+	if err := encoder.Encode(helpJSON{Version: app.version, Commands: app.commands}); err != nil {
 		return fmt.Errorf("encoding the command list: %w", err)
 	}
 	return nil

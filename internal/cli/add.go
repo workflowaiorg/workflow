@@ -82,6 +82,11 @@ func runAdd(app *App, args []string) error {
 		}
 	}
 
+	if c.Check != nil {
+		if err := c.Check(app.dir, answers); err != nil {
+			return err
+		}
+	}
 	configFile, err := project.WithComponent(app.dir, name, answers)
 	if err != nil {
 		return err
@@ -92,7 +97,7 @@ func runAdd(app *App, args []string) error {
 		return err
 	}
 	fmt.Fprintln(app.stdout, "wrote    "+project.BaseDir+"/")
-	written, err := base.ComponentSkeleton(app.dir, c)
+	written, err := base.ComponentSkeleton(app.dir, c, answers)
 	if err != nil {
 		return err
 	}
@@ -135,7 +140,11 @@ func (app *App) componentUsage(c component.Component) error {
 		case len(option.Choices) > 0:
 			takes = strings.Join(option.Choices, ", ") + "; "
 		}
-		fmt.Fprintf(table, "  %s\t%s (%sdefault %s)\n", flag, option.Question, takes, option.Default)
+		fallback := "no default"
+		if option.Default != "" {
+			fallback = "default " + option.Default
+		}
+		fmt.Fprintf(table, "  %s\t%s (%s%s)\n", flag, option.Question, takes, fallback)
 	}
 	if err := table.Flush(); err != nil {
 		return err
@@ -159,47 +168,4 @@ func (app *App) listComponents() error {
 		fmt.Fprintf(table, "  %s\t%s\t%s\n", c.Name, c.Summary, state)
 	}
 	return table.Flush()
-}
-
-// runComponent runs wf <name> <command>, a command of the installed component name.
-func (app *App) runComponent(name string, args []string) error {
-	config, installed, err := app.load()
-	if err != nil {
-		return err
-	}
-	index := slices.IndexFunc(installed, func(c component.Component) bool { return c.Name == name })
-	if index < 0 {
-		return fmt.Errorf("%w: the %s component is not installed; wf add %s installs it", errUsage, name, name)
-	}
-	c := installed[index]
-
-	if len(c.Commands) == 0 {
-		return fmt.Errorf("%w: %s has no commands", errUsage, c)
-	}
-	var usage strings.Builder
-	table := tabwriter.NewWriter(&usage, 0, 0, 3, ' ', 0)
-	for _, command := range c.Commands {
-		fmt.Fprintf(table, "\n  %s\t%s", command.Usage, command.Summary)
-	}
-	if err := table.Flush(); err != nil {
-		return err
-	}
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
-		if len(args) == 0 {
-			return fmt.Errorf("%w: names one of its commands:%s", errUsage, usage.String())
-		}
-		_, err := fmt.Fprintf(app.stdout, "Commands of %s:%s\n", c, usage.String())
-		return err
-	}
-	commandIndex := slices.IndexFunc(c.Commands, func(command component.Command) bool { return command.Name == args[0] })
-	if commandIndex < 0 {
-		return fmt.Errorf("%w: %s has no command %q; it has:%s", errUsage, c, args[0], usage.String())
-	}
-	return c.Commands[commandIndex].Run(component.Context{
-		Dir:     app.dir,
-		Config:  config,
-		Answers: config.Components[name],
-		Stdout:  app.stdout,
-		Stderr:  app.stderr,
-	}, args[1:])
 }

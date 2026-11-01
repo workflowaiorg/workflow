@@ -1,11 +1,10 @@
 // Package component is what a project can add to wf, one capability at a time: each component
-// brings its own part of the base, its own wf commands and its own gate steps, and records itself
-// in .wf.yml when wf add installs it.
+// brings its own part of the base, its own gate steps and doctor checks, and records itself in
+// .wf.yml when wf add installs it. Each component wf carries is a package below this one.
 package component
 
 import (
 	"fmt"
-	"io"
 	"io/fs"
 	"maps"
 	"slices"
@@ -16,7 +15,7 @@ import (
 
 // Component is one capability wf add installs.
 type Component struct {
-	// Name is how the project names it: wf add <name>, and wf <name> … for its commands.
+	// Name is how the project names it: wf add <name>.
 	Name    string
 	Summary string
 	// Options are the questions wf add asks, each also a flag of wf add.
@@ -30,8 +29,9 @@ type Component struct {
 	Gate []project.GateStep
 	// Doctor holds its checks for wf doctor, which run before the project's own.
 	Doctor []project.Check
-	// Commands are run as wf <name> <command>.
-	Commands []Command
+	// Check, when set, checks the answers against the project before wf add writes anything, so a
+	// wrong answer is not written into files the project then owns.
+	Check func(dir string, answers map[string]any) error
 	// Edits says what the developer should change by hand in files the project owns. wf never
 	// edits them itself.
 	Edits func(answers map[string]any) []string
@@ -49,26 +49,6 @@ type Option struct {
 	// Choices, when set, are the only answers accepted.
 	Choices []string
 }
-
-// Command is one of a component's commands.
-type Command struct {
-	Name    string
-	Usage   string
-	Summary string
-	Run     func(ctx Context, args []string) error
-}
-
-// Context is what a command runs with.
-type Context struct {
-	Dir     string
-	Config  project.Config
-	Answers map[string]any
-	Stdout  io.Writer
-	Stderr  io.Writer
-}
-
-// All are the components wf carries.
-var All []Component
 
 // Installed returns the components config records, sorted by name, from known. A name wf does not
 // know is the developer's mistake.

@@ -252,7 +252,7 @@ check that waits for a service should retry on its own, as the `curl --retry` ex
 
 A component adds one capability to the project, such as a backend or a frontend. It brings its own
 skills, commands and sections of `AGENTS.md` and the guide; its own steps in `/pre-mr-check`'s gate;
-its own checks in `wf doctor`; and its own wf commands, which start with its name: `wf <component> <command>`.
+and its own checks in `wf doctor`.
 
 ```sh
 wf add                    # list the components wf carries
@@ -271,8 +271,46 @@ Every question is also a flag, so a script or an agent passes the answer instead
 When the component needs a change in a file your project owns, such as `.gitignore`, wf prints it on
 a `by hand` line and leaves the change to you. Commit what `wf add` wrote, as after `wf init`.
 
-wf carries no components yet; the backend and frontend come next. `wf add` lists what your version
-has.
+`wf add` lists the components your version carries. The frontend comes next.
+
+### The backend
+
+A Go backend of services, each built the same way.
+
+```sh
+wf add backend --module=github.com/acme/shop
+go mod tidy          # downloads the modules the new code imports
+go test ./...
+wf up                # the first start compiles for a minute, then:
+curl http://localhost:8000/health
+```
+
+`wf add backend` writes, once, files that are yours from then on:
+
+| What | Where |
+|---|---|
+| the Go module | `go.mod` |
+| the packages every service shares: logging, errors, HTTP answers, the correlation ID | `pkg/` |
+| a first service, `api`, with its settings, `/health` and tests | `api/` |
+| the local stack, building each service from its source as it starts | `docker-compose.yaml` |
+
+If one of them exists already, wf leaves it alone. With your own `docker-compose.yaml`, add the
+`api` service to it by hand. In a project that has a `go.mod`, `--module` must be the module it
+names.
+
+There is no Dockerfile: locally each service is built from its source as it starts, and an image is
+a deploy's business.
+
+It also brings:
+
+- the skills `architecture`, `api-design`, `configuration`, `error-handling`, `shared-packages`,
+  `testing` and `go-style`, and a backend section in `AGENTS.md`;
+- three gate steps for `/pre-mr-check` when Go files change: `gofmt`, `go vet ./...` and
+  `go test ./...`;
+- two `wf doctor` checks: Go is installed and Docker is running.
+
+wf has no commands for the routine: the agent runs `go test`, `go mod tidy` and the rest itself, as
+the skills say. A new service is a copy of `api`, made as the `architecture` skill says.
 
 ## Settings: .wf.yml
 
@@ -307,7 +345,7 @@ doctor:
 # The components wf add installed, with the answers given. wf add writes this.
 components:
   backend:
-    grpc: true
+    module: github.com/acme/shop
 ```
 
 - `wf` and `forge` are required. `wf sync`, `wf show` and `wf worktree` check every setting first,
@@ -334,10 +372,6 @@ Starts using wf in a project. See [Start in a project](#start-in-a-project).
 Adds a component; with no component, lists them. `wf add <component> -h` lists its options and
 the flag for each. See [Components](#components). `--force` is
 passed on to its `wf sync`.
-
-### `wf <component> <command>`
-
-Runs a command of an installed component. `wf <component> -h` lists them, and so does `wf help`.
 
 ### `wf lock`
 
@@ -524,6 +558,8 @@ What wf installs:
 | `no .wf.yml in …: run wf in the project's root` | Run wf where `.wf.yml` is. `wf up` and `wf down` run there too, so compose uses the project's own compose file |
 | `docker compose …: exec: "docker": executable file not found` | Install Docker with its compose plugin, and make sure `docker` is on your `PATH` |
 | `docker compose …: exit status N` | docker printed why above. Is Docker running, and is there a compose file at the project's root? |
+| `--module "…" is not a Go module path` | Pass a path such as `github.com/acme/shop`; the message says which part Go rejects |
+| `go.mod names the module X, not Y` | Run `wf add backend --module=X`: the files it writes import your packages by that path |
 | `.wf.yml: worktree.copy …`, `worktree.skip …` | Make it a list of globs, such as `[".env*"]`, and check each pattern |
 | `.wf.yml: components.<name> is not a component wf knows` | Run the wf version that added it: `.wf.yml` pins it |
 | `<component> and another part of the base both have <file>` | Two components clash; add only one of them, and report it |

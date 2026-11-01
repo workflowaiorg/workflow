@@ -1,0 +1,63 @@
+package httputil_test
+
+import (
+	stderrors "errors"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/httputil"
+)
+
+func respond(t *testing.T, answer func(c *gin.Context)) *httptest.ResponseRecorder {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.GET("/", answer)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/", nil))
+	return w
+}
+
+func TestResponses(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer func(c *gin.Context)
+		status int
+		body   string
+	}{
+		{
+			name:   "success",
+			answer: func(c *gin.Context) { httputil.Success(c, gin.H{"id": 7}) },
+			status: http.StatusOK,
+			body:   `{"data":{"id":7}}`,
+		},
+		{
+			name: "an APIError keeps its code and message",
+			answer: func(c *gin.Context) {
+				httputil.RespondWithError(c, errors.New(errors.CodeNotFound, "No such order", nil))
+			},
+			status: http.StatusNotFound,
+			body:   `{"error":{"code":"NOT_FOUND","message":"No such order"}}`,
+		},
+		{
+			name: "any other error tells nothing of its cause",
+			answer: func(c *gin.Context) {
+				httputil.RespondWithError(c, stderrors.New("the password is hunter2"))
+			},
+			status: http.StatusInternalServerError,
+			body:   `{"error":{"code":"INTERNAL_ERROR","message":"Something went wrong. Please try again later."}}`,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			w := respond(t, test.answer)
+			assert.Equal(t, test.status, w.Code)
+			assert.JSONEq(t, test.body, w.Body.String())
+		})
+	}
+}

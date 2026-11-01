@@ -1,0 +1,45 @@
+package middleware_test
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+
+	"[[ .module ]]/pkg/logging"
+	"[[ .module ]]/pkg/middleware"
+)
+
+func TestCorrelationID(t *testing.T) {
+	tests := []struct {
+		name     string
+		incoming string
+	}{
+		{name: "kept from the caller", incoming: "abc-123"},
+		{name: "made when there is none"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			r := gin.New()
+			r.Use(middleware.CorrelationID())
+			var seen string
+			r.GET("/", func(c *gin.Context) { seen = logging.CorrelationID(c.Request.Context()) })
+
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			if test.incoming != "" {
+				req.Header.Set(middleware.CorrelationIDHeader, test.incoming)
+			}
+			w := httptest.NewRecorder()
+			r.ServeHTTP(w, req)
+
+			assert.NotEmpty(t, seen)
+			assert.Equal(t, seen, w.Header().Get(middleware.CorrelationIDHeader))
+			if test.incoming != "" {
+				assert.Equal(t, test.incoming, seen)
+			}
+		})
+	}
+}

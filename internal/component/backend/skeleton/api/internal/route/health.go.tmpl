@@ -1,0 +1,20 @@
+// Package route wires each domain, one file each: gateways and repositories, then the controller,
+// then the handler, then its routes.
+package route
+
+import (
+	"github.com/gin-gonic/gin"
+
+	"[[ .module ]]/api/internal/app"
+	healthctrl "[[ .module ]]/api/internal/controller/health"
+	healthhttp "[[ .module ]]/api/internal/handler/health/http"
+)
+
+// RegisterHealthRoutes serves GET /health. A domain that opens a gateway or a repository returns
+// the error when that fails; this one opens nothing.
+func RegisterHealthRoutes(application *app.App, r gin.IRouter) error {
+	ctrl := healthctrl.New()
+	handler := healthhttp.New(ctrl)
+	r.GET("/health", handler.Show)
+	return nil
+}

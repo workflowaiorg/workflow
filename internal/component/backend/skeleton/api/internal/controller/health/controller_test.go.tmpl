@@ -1,0 +1,16 @@
+package health_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/api/internal/controller/health"
+)
+
+func TestStatus(t *testing.T) {
+	status, err := health.New().Status(t.Context())
+	require.NoError(t, err)
+	assert.Equal(t, "ok", status)
+}

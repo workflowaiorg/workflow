@@ -1,0 +1,98 @@
+// Package errors is the one error type that crosses a service's layers: a code a client can act
+// on, a message it can show, and the cause, which stays in the logs.
+package errors
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+)
+
+// Code says what kind of failure an APIError is.
+type Code string
+
+const (
+	CodeInvalidRequest  Code = "INVALID_REQUEST"
+	CodeUnauthorized    Code = "UNAUTHORIZED"
+	CodeForbidden       Code = "FORBIDDEN"
+	CodeNotFound        Code = "NOT_FOUND"
+	CodeConflict        Code = "CONFLICT"
+	CodeTooManyRequests Code = "TOO_MANY_REQUESTS"
+	CodeInternal        Code = "INTERNAL_ERROR"
+	CodeBadGateway      Code = "BAD_GATEWAY"
+	CodeUnavailable     Code = "SERVICE_UNAVAILABLE"
+)
+
+// APIError is an error with a code and a message meant for the client. Cause is never sent.
+type APIError struct {
+	Code    Code   `json:"code"`
+	Message string `json:"message"`
+	Cause   error  `json:"-"`
+}
+
+func (e *APIError) Error() string {
+	if e.Cause != nil {
+		return fmt.Sprintf("%s: %s (cause: %v)", e.Code, e.Message, e.Cause)
+	}
+	return fmt.Sprintf("%s: %s", e.Code, e.Message)
+}
+
+func (e *APIError) Unwrap() error { return e.Cause }
+
+// New returns an APIError.
+func New(code Code, message string, cause error) *APIError {
+	return &APIError{Code: code, Message: message, Cause: cause}
+}
+
+// As is errors.As, so a package that imports this one needs no other errors package.
+func As(err error, target any) bool { return errors.As(err, target) }
+
+// Is is errors.Is.
+func Is(err, target error) bool { return errors.Is(err, target) }
+
+// HTTPStatus is the HTTP status a response with code carries.
+func HTTPStatus(code Code) int {
+	switch code {
+	case CodeInvalidRequest:
+		return http.StatusBadRequest
+	case CodeUnauthorized:
+		return http.StatusUnauthorized
+	case CodeForbidden:
+		return http.StatusForbidden
+	case CodeNotFound:
+		return http.StatusNotFound
+	case CodeConflict:
+		return http.StatusConflict
+	case CodeTooManyRequests:
+		return http.StatusTooManyRequests
+	case CodeBadGateway:
+		return http.StatusBadGateway
+	case CodeUnavailable:
+		return http.StatusServiceUnavailable
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// FromHTTPStatus is the code of a status another service answered with. A status not listed, a
+// 500 included, is CodeBadGateway: a failure in a service we called is a gateway failure to us.
+func FromHTTPStatus(status int) Code {
+	switch status {
+	case http.StatusBadRequest, http.StatusUnprocessableEntity:
+		return CodeInvalidRequest
+	case http.StatusUnauthorized:
+		return CodeUnauthorized
+	case http.StatusForbidden:
+		return CodeForbidden
+	case http.StatusNotFound:
+		return CodeNotFound
+	case http.StatusConflict:
+		return CodeConflict
+	case http.StatusTooManyRequests:
+		return CodeTooManyRequests
+	case http.StatusServiceUnavailable:
+		return CodeUnavailable
+	default:
+		return CodeBadGateway
+	}
+}

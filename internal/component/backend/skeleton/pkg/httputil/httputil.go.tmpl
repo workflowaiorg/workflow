@@ -1,0 +1,50 @@
+// Package httputil is how a Gin handler answers: every body is {"data": …} or
+// {"error": {"code", "message"}}, so every client reads every service the same way.
+package httputil
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/logging"
+)
+
+// Response is every body a service sends.
+type Response struct {
+	Data  any    `json:"data,omitempty"`
+	Error *Error `json:"error,omitempty"`
+}
+
+// Error is what a client is told of a failure.
+type Error struct {
+	Code    errors.Code `json:"code"`
+	Message string      `json:"message"`
+}
+
+// Success answers 200 with data.
+func Success(c *gin.Context, data any) {
+	c.JSON(http.StatusOK, Response{Data: data})
+}
+
+// Created answers 201 with data.
+func Created(c *gin.Context, data any) {
+	c.JSON(http.StatusCreated, Response{Data: data})
+}
+
+// RespondWithError answers with err: an APIError with its code, its status and its message, and
+// any other error as a 500 that says nothing of its cause. Both are logged with their cause.
+func RespondWithError(c *gin.Context, err error) {
+	var apiErr *errors.APIError
+	if !errors.As(err, &apiErr) {
+		apiErr = errors.New(errors.CodeInternal, "Something went wrong. Please try again later.", err)
+	}
+	logging.Error(c.Request.Context(), "request failed", "code", apiErr.Code, "error", apiErr.Cause)
+	c.JSON(errors.HTTPStatus(apiErr.Code), Response{Error: &Error{Code: apiErr.Code, Message: apiErr.Message}})
+}
+
+// BindError is the APIError for a request ShouldBind* rejected.
+func BindError(err error) *errors.APIError {
+	return errors.New(errors.CodeInvalidRequest, "The request is not valid: "+err.Error(), err)
+}

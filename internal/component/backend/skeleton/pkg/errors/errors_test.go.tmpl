@@ -1,0 +1,46 @@
+package errors_test
+
+import (
+	stderrors "errors"
+	"fmt"
+	"net/http"
+	"testing"
+
+	"[[ .module ]]/pkg/errors"
+)
+
+func TestAWrappedAPIErrorIsFound(t *testing.T) {
+	cause := stderrors.New("connection refused")
+	err := fmt.Errorf("loading the order: %w", errors.New(errors.CodeUnavailable, "Orders are unavailable", cause))
+
+	var apiErr *errors.APIError
+	if !errors.As(err, &apiErr) || apiErr.Code != errors.CodeUnavailable {
+		t.Fatalf("As(%v) found %v, want the APIError", err, apiErr)
+	}
+	if !errors.Is(err, cause) {
+		t.Error("the cause is lost")
+	}
+}
+
+func TestHTTPStatusAndBack(t *testing.T) {
+	tests := []struct {
+		code   errors.Code
+		status int
+	}{
+		{errors.CodeInvalidRequest, http.StatusBadRequest},
+		{errors.CodeNotFound, http.StatusNotFound},
+		{errors.CodeConflict, http.StatusConflict},
+		{errors.CodeUnavailable, http.StatusServiceUnavailable},
+	}
+	for _, test := range tests {
+		if got := errors.HTTPStatus(test.code); got != test.status {
+			t.Errorf("HTTPStatus(%s) = %d, want %d", test.code, got, test.status)
+		}
+		if got := errors.FromHTTPStatus(test.status); got != test.code {
+			t.Errorf("FromHTTPStatus(%d) = %s, want %s", test.status, got, test.code)
+		}
+	}
+	if got := errors.FromHTTPStatus(http.StatusInternalServerError); got != errors.CodeBadGateway {
+		t.Errorf("FromHTTPStatus(500) = %s, want %s", got, errors.CodeBadGateway)
+	}
+}

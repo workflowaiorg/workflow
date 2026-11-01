@@ -1,0 +1,18 @@
+// Package health says whether the service can do its work.
+package health
+
+import "context"
+
+// Controller checks the service's health. A service that depends on a database or another service
+// receives it here, through an interface of its own, and checks it in Status.
+type Controller struct{}
+
+// New returns the Controller.
+func New() *Controller {
+	return &Controller{}
+}
+
+// Status is "ok" when the service can do its work.
+func (c *Controller) Status(ctx context.Context) (string, error) {
+	return "ok", nil
+}
