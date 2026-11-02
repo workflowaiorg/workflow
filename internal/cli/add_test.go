@@ -299,6 +299,9 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 
 			t.Setenv("GOWORK", "off")
 			t.Setenv("GOFLAGS", "")
+			// The project's own Go version, as CI has it: a module that needs a newer Go fails here
+			// rather than upgrading the toolchain unseen.
+			t.Setenv("GOTOOLCHAIN", "local")
 			for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {
 				command := exec.Command("go", args...)
 				command.Dir = dir
