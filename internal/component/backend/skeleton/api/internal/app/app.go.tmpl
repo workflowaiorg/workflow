@@ -3,12 +3,18 @@
 package app
 
 import (
+[[- if .queue ]]
+	"sync"
+[[ end ]]
 [[- if .postgres ]]
 	"github.com/uptrace/bun"
 [[ end ]]
 	"[[ .module ]]/api/internal/config"
 [[- if .postgres ]]
 	"[[ .module ]]/pkg/postgres"
+[[- end ]]
+[[- if .queue ]]
+	"[[ .module ]]/pkg/queue"
 [[- end ]]
 )
 
@@ -19,13 +25,24 @@ type App struct {
 	// DB is the service's one pool of connections to PostgreSQL, which every repository shares.
 	DB *bun.DB
 [[- end ]]
+[[- if .queue ]]
+	// Queue puts jobs on the queue, for this service's workers or another's.
+	Queue *queue.Queue
+	// Workers are the service's workers, which a route starts with Workers.Go; main waits for
+	// them to stop before it closes the Queue.
+	Workers sync.WaitGroup
+[[- end ]]
 }
 
 // New returns the App of a service started with cfg.
 func New(cfg *config.Config) *App {
+	return &App{
+		Config: cfg,
 [[- if .postgres ]]
-	return &App{Config: cfg, DB: postgres.Open(cfg.PostgresDSN)}
-[[- else ]]
-	return &App{Config: cfg}
+		DB:     postgres.Open(cfg.PostgresDSN),
 [[- end ]]
+[[- if .queue ]]
+		Queue:  queue.New(cfg.RedisAddr),
+[[- end ]]
+	}
 }

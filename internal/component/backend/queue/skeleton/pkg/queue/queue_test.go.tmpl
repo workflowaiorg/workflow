@@ -1,0 +1,174 @@
+package queue_test
+
+import (
+	"context"
+	"errors"
+	"testing"
+	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/pkg/queue"
+)
+
+const stream = "test:greet"
+
+type greetJob struct {
+	Name string `json:"name"`
+}
+
+// newQueue returns a Queue of a Redis of its own.
+func newQueue(t *testing.T) (*miniredis.Miniredis, *queue.Queue) {
+	t.Helper()
+	redis := miniredis.RunT(t)
+	q := queue.New(redis.Addr())
+	t.Cleanup(func() { _ = q.Close() })
+	return redis, q
+}
+
+// work runs a worker of stream on q, sending each job it runs to the channel it returns; run
+// answers each. The worker stops when the test ends, before q is closed.
+func work(t *testing.T, q *queue.Queue, run func(greetJob) error) <-chan greetJob {
+	t.Helper()
+	ran := make(chan greetJob, 10)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		queue.Work(ctx, q, stream, func(_ context.Context, job greetJob) error {
+			ran <- job
+			return run(job)
+		})
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	return ran
+}
+
+// start runs a worker of stream on a Redis of its own, as work does.
+func start(t *testing.T, run func(greetJob) error) (*miniredis.Miniredis, *queue.Queue, <-chan greetJob) {
+	t.Helper()
+	redis, q := newQueue(t)
+	return redis, q, work(t, q, run)
+}
+
+func next(t *testing.T, ran <-chan greetJob) greetJob {
+	t.Helper()
+	select {
+	case job := <-ran:
+		return job
+	case <-time.After(5 * time.Second):
+		t.Fatal("no job was run")
+		return greetJob{}
+	}
+}
+
+func TestAJobPutOnTheQueueIsRunAndDeleted(t *testing.T) {
+	redis, q, ran := start(t, func(greetJob) error { return nil })
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Ada"}))
+
+	assert.Equal(t, greetJob{Name: "Ada"}, next(t, ran))
+	assert.Eventually(t, func() bool {
+		entries, err := redis.Stream(stream)
+		return err == nil && len(entries) == 0
+	}, 5*time.Second, 10*time.Millisecond, "the job is still on the stream")
+}
+
+func TestAJobPutBeforeAnyWorkerStartedIsRun(t *testing.T) {
+	_, q := newQueue(t)
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Ada"}))
+
+	ran := work(t, q, func(greetJob) error { return nil })
+	assert.Equal(t, greetJob{Name: "Ada"}, next(t, ran))
+}
+
+func TestAFailedJobRunsAgainUntilItsLastRun(t *testing.T) {
+	redis, q, ran := start(t, func(greetJob) error { return errors.New("failed") })
+	now := time.Now()
+	redis.SetTime(now)
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Ada"}))
+
+	for range queue.MaxRuns {
+		assert.Equal(t, greetJob{Name: "Ada"}, next(t, ran))
+		// Redis's clock, which says how long the job has waited, moves on to its next run.
+		now = now.Add(queue.RetryAfter)
+		redis.SetTime(now)
+	}
+	assert.Eventually(t, func() bool {
+		entries, err := redis.Stream(stream)
+		return err == nil && len(entries) == 0
+	}, 5*time.Second, 10*time.Millisecond, "the job was not dropped after its last run")
+	assert.Empty(t, ran, "the job ran more than queue.MaxRuns times")
+}
+
+func TestAJobThatCannotBeReadIsDropped(t *testing.T) {
+	redis, _, ran := start(t, func(greetJob) error { return nil })
+	_, err := redis.XAdd(stream, "*", []string{"job", "not json"})
+	require.NoError(t, err)
+
+	assert.Eventually(t, func() bool {
+		entries, err := redis.Stream(stream)
+		return err == nil && len(entries) == 0
+	}, 5*time.Second, 10*time.Millisecond, "the job is still on the stream")
+	assert.Empty(t, ran, "a job that cannot be read was run")
+}
+
+func TestAJobThatPanicsRunsAgainAndTheWorkerGoesOn(t *testing.T) {
+	redis, q, ran := start(t, func(job greetJob) error {
+		if job.Name == "Bug" {
+			panic("a bug")
+		}
+		return nil
+	})
+	now := time.Now()
+	redis.SetTime(now)
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Bug"}))
+	assert.Equal(t, greetJob{Name: "Bug"}, next(t, ran))
+
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Ada"}))
+	assert.Equal(t, greetJob{Name: "Ada"}, next(t, ran), "the worker stopped after a job panicked")
+	redis.SetTime(now.Add(queue.RetryAfter))
+	assert.Equal(t, greetJob{Name: "Bug"}, next(t, ran), "the job that panicked did not run again")
+}
+
+func TestAWorkerGoesOnAfterRedisLostItsGroup(t *testing.T) {
+	redis, q, ran := start(t, func(greetJob) error { return nil })
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Ada"}))
+	assert.Equal(t, greetJob{Name: "Ada"}, next(t, ran))
+	// Once Ada's job is deleted: a job put on the new stream can have the same ID.
+	require.Eventually(t, func() bool {
+		entries, err := redis.Stream(stream)
+		return err == nil && len(entries) == 0
+	}, 5*time.Second, 10*time.Millisecond)
+
+	redis.FlushAll()
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Grace"}))
+	assert.Equal(t, greetJob{Name: "Grace"}, next(t, ran))
+}
+
+func TestARunEndsBeforeItCouldBeHandedToAnotherWorker(t *testing.T) {
+	_, q := newQueue(t)
+	deadlines := make(chan time.Time, 1)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		queue.Work(ctx, q, stream, func(ctx context.Context, _ greetJob) error {
+			deadline, _ := ctx.Deadline()
+			deadlines <- deadline
+			return nil
+		})
+	}()
+	t.Cleanup(func() { cancel(); <-done })
+	started := time.Now()
+	require.NoError(t, q.Enqueue(t.Context(), stream, greetJob{Name: "Ada"}))
+
+	select {
+	case deadline := <-deadlines:
+		assert.WithinDuration(t, started.Add(queue.RunFor), deadline, 5*time.Second)
+		assert.Less(t, queue.RunFor, queue.RetryAfter)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no job was run")
+	}
+}

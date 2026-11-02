@@ -22,19 +22,28 @@ func main() {
 	logging.Init()
 	cfg := config.Load()
 	application := app.New(cfg)
+	// ctx ends on SIGINT or SIGTERM: the server then drains its requests[[ if .queue ]] and the workers stop[[ end ]].
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	r := gin.New()
 	r.Use(gin.Recovery(), middleware.CorrelationID())
 	if err := r.SetTrustedProxies(nil); err != nil {
-		logging.Error(context.Background(), "setting trusted proxies", "error", err)
+		logging.Error(ctx, "setting trusted proxies", "error", err)
 		os.Exit(1)
 	}
-	if err := route.RegisterHealthRoutes(application, r); err != nil {
-		logging.Error(context.Background(), "registering the health routes", "error", err)
+	if err := route.RegisterHealthRoutes(ctx, application, r); err != nil {
+		logging.Error(ctx, "registering the health routes", "error", err)
 		os.Exit(1)
 	}
 
-	serve(r, cfg.Port)
+	serve(ctx, r, cfg.Port)
+[[- if .queue ]]
+	application.Workers.Wait()
+	if err := application.Queue.Close(); err != nil {
+		logging.Error(context.Background(), "closing the queue", "error", err)
+	}
+[[- end ]]
 [[- if .postgres ]]
 	if err := application.DB.Close(); err != nil {
 		logging.Error(context.Background(), "closing the database", "error", err)
@@ -42,12 +51,8 @@ func main() {
 [[- end ]]
 }
 
-// serve answers on port until SIGINT or SIGTERM, then gives the requests in flight five seconds
-// to finish.
-func serve(handler http.Handler, port string) {
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
+// serve answers on port until ctx ends, then gives the requests in flight five seconds to finish.
+func serve(ctx context.Context, handler http.Handler, port string) {
 	server := &http.Server{Addr: ":" + port, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		logging.Info(ctx, "listening", "addr", server.Addr)

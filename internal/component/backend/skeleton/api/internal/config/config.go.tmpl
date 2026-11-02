@@ -20,6 +20,11 @@ type Config struct {
 	// local stack's.
 	PostgresDSN string
 [[- end ]]
+[[- if .queue ]]
+
+	// RedisAddr is where the queue's Redis is, as host:port: REDIS_ADDR, or the local stack's.
+	RedisAddr string
+[[- end ]]
 }
 
 // Load reads the settings from the environment. It is the only place the service reads it.
@@ -34,6 +39,9 @@ func Load() *Config {
 		RawQuery: url.Values{"sslmode": {getenv("POSTGRES_SSLMODE", "disable")}}.Encode(),
 	}
 	cfg.PostgresDSN = dsn.String()
+[[- end ]]
+[[- if .queue ]]
+	cfg.RedisAddr = getenv("REDIS_ADDR", "redis:6379")
 [[- end ]]
 	return cfg
 }
