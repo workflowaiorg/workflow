@@ -90,10 +90,11 @@ types or driver errors. `New` takes the connection it reads from; it does not op
 
 One file per domain. It builds gateways and repositories, then the controller, then the handler,
 then registers the routes. When building something fails it returns the error, closing whatever it
-had already opened, and `main()` exits.
+had already opened, and `main()` exits. `ctx` ends when the service is told to stop; work the route
+starts in the background stops with it.
 
 ```go
-func RegisterOrderRoutes(application *app.App, r gin.IRouter) error {
+func RegisterOrderRoutes(ctx context.Context, application *app.App, r gin.IRouter) error {
     payments, err := paymentsgrpc.New(application.Config.Payments.Addr)
     if err != nil {
         return fmt.Errorf("payments gateway: %w", err)

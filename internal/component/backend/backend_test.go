@@ -14,20 +14,29 @@ import (
 	"github.com/workflowaiorg/workflow/internal/component/backend"
 )
 
+// options is which of the backend's options are chosen.
+type options struct {
+	postgres, queue bool
+}
+
+// everyChoice is every way the options can be chosen.
+var everyChoice = []options{{}, {postgres: true}, {queue: true}, {postgres: true, queue: true}}
+
 // written renders the backend's skeleton for the module example.com/shop into a new directory,
-// with postgres or without.
-func written(t *testing.T, postgres bool) string {
+// with the options chosen.
+func written(t *testing.T, chosen options) string {
 	t.Helper()
 	dir := t.TempDir()
-	if _, err := base.ComponentSkeleton(dir, backend.Component, map[string]any{"module": "example.com/shop", "postgres": postgres}); err != nil {
+	answers := map[string]any{"module": "example.com/shop", "postgres": chosen.postgres, "queue": chosen.queue}
+	if _, err := base.ComponentSkeleton(dir, backend.Component, answers); err != nil {
 		t.Fatal(err)
 	}
 	return dir
 }
 
 func TestTheSkeletonIsGoInTheProjectsModule(t *testing.T) {
-	for _, postgres := range []bool{false, true} {
-		t.Run(fmt.Sprintf("postgres %v", postgres), func(t *testing.T) { checkSkeleton(t, written(t, postgres)) })
+	for _, chosen := range everyChoice {
+		t.Run(fmt.Sprintf("%+v", chosen), func(t *testing.T) { checkSkeleton(t, written(t, chosen)) })
 	}
 }
 
@@ -73,7 +82,7 @@ func checkSkeleton(t *testing.T, dir string) {
 }
 
 func TestTheFirstServiceIsInTheStack(t *testing.T) {
-	compose, err := os.ReadFile(filepath.Join(written(t, false), "docker-compose.yaml"))
+	compose, err := os.ReadFile(filepath.Join(written(t, options{}), "docker-compose.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -123,7 +132,7 @@ func TestTheModuleIsChecked(t *testing.T) {
 
 func TestPostgresExistsOnlyWhenChosen(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
-		dir := written(t, postgres)
+		dir := written(t, options{postgres: postgres})
 		_, err := os.Stat(filepath.Join(dir, "pkg/postgres/postgres.go"))
 		if (err == nil) != postgres {
 			t.Errorf("with postgres %v, pkg/postgres exists = %v", postgres, err == nil)
@@ -148,7 +157,7 @@ func TestPostgresExistsOnlyWhenChosen(t *testing.T) {
 }
 
 func TestPostgresComesUpBeforeTheService(t *testing.T) {
-	compose, err := os.ReadFile(filepath.Join(written(t, true), "docker-compose.yaml"))
+	compose, err := os.ReadFile(filepath.Join(written(t, options{postgres: true}), "docker-compose.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,6 +169,56 @@ func TestPostgresComesUpBeforeTheService(t *testing.T) {
 	} {
 		if !strings.Contains(string(compose), want) {
 			t.Errorf("docker-compose.yaml does not hold %q:\n%s", want, compose)
+		}
+	}
+}
+
+func TestTheQueueExistsOnlyWhenChosen(t *testing.T) {
+	for _, queue := range []bool{false, true} {
+		dir := written(t, options{queue: queue})
+		_, err := os.Stat(filepath.Join(dir, "pkg/queue/queue.go"))
+		if (err == nil) != queue {
+			t.Errorf("with queue %v, pkg/queue exists = %v", queue, err == nil)
+		}
+		// What each file holds of the queue, when it is chosen.
+		marks := map[string]string{
+			"docker-compose.yaml":           "redis",
+			"api/internal/app/app.go":       "queue.New",
+			"api/internal/config/config.go": "RedisAddr",
+			"api/cmd/http/main.go":          "Workers.Wait",
+		}
+		for name, mark := range marks {
+			content, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(content), mark); got != queue {
+				t.Errorf("with queue %v, %s holds %s = %v:\n%s", queue, name, mark, got, content)
+			}
+		}
+	}
+}
+
+func TestTheServiceWaitsForEveryStoreItUses(t *testing.T) {
+	tests := []struct {
+		chosen options
+		want   string
+	}{
+		{options{queue: true}, "    depends_on:\n      redis:\n        condition: service_healthy\n\n"},
+		{
+			options{postgres: true, queue: true},
+			"    depends_on:\n      migrate:\n        condition: service_completed_successfully\n      redis:\n        condition: service_healthy\n\n",
+		},
+	}
+	for _, test := range tests {
+		compose, err := os.ReadFile(filepath.Join(written(t, test.chosen), "docker-compose.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, want := range []string{test.want, "  redis-data:\n"} {
+			if !strings.Contains(string(compose), want) {
+				t.Errorf("with %+v, docker-compose.yaml does not hold %q:\n%s", test.chosen, want, compose)
+			}
 		}
 	}
 }

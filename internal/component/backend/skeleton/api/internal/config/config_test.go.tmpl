@@ -32,3 +32,16 @@ func TestPostgresDSN(t *testing.T) {
 	}
 }
 [[- end ]]
+[[- if .queue ]]
+
+func TestRedisAddr(t *testing.T) {
+	t.Setenv("REDIS_ADDR", "")
+	if got := config.Load().RedisAddr; got != "redis:6379" {
+		t.Errorf("RedisAddr with no REDIS_ADDR = %q, want the local stack's redis:6379", got)
+	}
+	t.Setenv("REDIS_ADDR", "queue:6380")
+	if got := config.Load().RedisAddr; got != "queue:6380" {
+		t.Errorf("RedisAddr with REDIS_ADDR=queue:6380 = %q, want queue:6380", got)
+	}
+}
+[[- end ]]

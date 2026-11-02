@@ -42,10 +42,12 @@ The order never changes:
    the variable when one is missing.
 3. `app.New(cfg)`: open what is opened once, such as a database pool;
    `main` closes it once the server has stopped.
-4. `gin.New()` (never `gin.Default()`), with `gin.Recovery()` and `middleware.CorrelationID()`, and
+4. `ctx` from `signal.NotifyContext`, which ends on SIGINT or SIGTERM.
+5. `gin.New()` (never `gin.Default()`), with `gin.Recovery()` and `middleware.CorrelationID()`, and
    `SetTrustedProxies` set explicitly.
-5. Register each domain's routes; a registration that returns an error is logged and exits 1.
-6. Serve until SIGINT or SIGTERM, then shut down with a timeout, so requests in flight finish.
+6. Register each domain's routes, passing `ctx`; a registration that returns an error is logged and
+   exits 1.
+7. Serve until `ctx` ends, then shut down with a timeout, so requests in flight finish.
 
 `api/cmd/http/main.go` is the reference: copy it.
 

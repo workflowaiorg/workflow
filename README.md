@@ -322,6 +322,26 @@ backend: what you do not choose is not written at all. With it, the backend also
 `docker compose up -d` applies new migrations each time. `docker compose logs migrate` shows what it
 applied.
 
+#### With a queue
+
+```sh
+wf add backend --module=github.com/acme/shop --queue
+```
+
+For work too slow to do while someone waits: a service puts a job on a queue, and a worker, in that
+service or another, runs it in the background. `--queue` is asked when you leave it out, and is no
+by default. With it, the backend also has:
+
+| What | Where |
+|---|---|
+| the queue: putting a job on a [Redis](https://redis.io) stream, and a worker that runs each job, runs a failed one again a minute later, and drops it after five runs | `pkg/queue/` |
+| the queue's setting, `REDIS_ADDR`, defaulting to the local stack's, and the queue and the workers on the `App`; `main` waits for the workers to stop | `api/internal/config/`, `api/internal/app/`, `api/cmd/http/` |
+| a `redis` service that keeps its jobs on disk | `docker-compose.yaml` |
+| the `queue` skill, and a queue section in `AGENTS.md` | `.agents/base/` |
+
+The worker's tests run on [miniredis](https://github.com/alicebob/miniredis), an in-process Redis,
+so `go test ./...` needs no Redis running.
+
 ## Settings: .wf.yml
 
 ```yaml
@@ -366,8 +386,8 @@ components:
 - `doctor:` is optional. A component's checks come before yours. A command YAML would read as
   something else, such as `false`, goes in quotes: `run: "false"`.
 - `components:` is written by `wf add`. An answer the skills only quote can be edited here, then
-  `wf sync`. An option that adds files, such as the backend's `postgres`, is chosen when the
-  component is added: turning it on here adds none of them, and `wf sync --check` fails.
+  `wf sync`. An option that adds files, such as the backend's `postgres` or `queue`, is chosen
+  when the component is added: turning it on here adds none of them, and `wf sync --check` fails.
 
 ## Commands
 

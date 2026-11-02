@@ -1,0 +1,229 @@
+// Package queue runs work in the background: a service puts a job on a Redis stream, and a worker,
+// in that service or another, runs it. A job that fails is run again a little later, a few times
+// at most.
+package queue
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"time"
+
+	"github.com/redis/go-redis/v9"
+
+	"[[ .module ]]/pkg/logging"
+)
+
+const (
+	// group is the one consumer group of every stream: each job is run by one worker, wherever
+	// workers of its stream run.
+	group = "workers"
+	// field is the stream entry's one field, which holds the job as JSON.
+	field = "job"
+	// RetryAfter is how long a job waits to be run again after it failed, or after its worker
+	// stopped before finishing it.
+	RetryAfter = time.Minute
+	// MaxRuns is how many times a job is run before it is dropped, with an error logged.
+	MaxRuns = 5
+	// RunFor is how long a run may take before its ctx ends. It is shorter than RetryAfter, so a
+	// job still running is not handed to a second worker as well.
+	RunFor = RetryAfter - 10*time.Second
+	// wait is how long a worker waits for a new job before it looks for jobs to run again, and
+	// how long it waits after Redis could not be reached.
+	wait = time.Second
+)
+
+// Queue puts jobs on streams, through one Redis client.
+type Queue struct {
+	client *redis.Client
+}
+
+// New returns the Queue of the Redis at addr. It connects on the first job, so the service starts
+// while Redis is still starting.
+func New(addr string) *Queue {
+	return &Queue{client: redis.NewClient(&redis.Options{Addr: addr})}
+}
+
+// Close closes the connections to Redis.
+func (q *Queue) Close() error {
+	return q.client.Close()
+}
+
+// Enqueue puts job on stream.
+func (q *Queue) Enqueue(ctx context.Context, stream string, job any) error {
+	payload, err := json.Marshal(job)
+	if err != nil {
+		return fmt.Errorf("encoding a job for %s: %w", stream, err)
+	}
+	if err := q.client.XAdd(ctx, &redis.XAddArgs{Stream: stream, Values: map[string]any{field: payload}}).Err(); err != nil {
+		return fmt.Errorf("putting a job on %s: %w", stream, err)
+	}
+	return nil
+}
+
+// Work runs each job on stream with run, until ctx ends. A job run returns nil for is deleted. One
+// that returns an error, panics, or whose worker stopped, is run again after RetryAfter, by this
+// worker or another, and is dropped once it has been run MaxRuns times. A job that cannot be read
+// as a Job is dropped at once. Either drop is logged as an error. Each run gets a ctx that ends
+// after RunFor.
+func Work[Job any](ctx context.Context, q *Queue, stream string, run func(context.Context, Job) error) {
+	consumer := consumerName()
+	for !q.createGroup(ctx, stream) {
+		if !sleep(ctx, wait) {
+			return
+		}
+	}
+	// next is where the next look for jobs to run again starts: Redis looks at a hundred at most.
+	next := "0-0"
+	for ctx.Err() == nil {
+		stale, cursor, err := q.client.XAutoClaim(ctx, &redis.XAutoClaimArgs{
+			Stream: stream, Group: group, Consumer: consumer, MinIdle: RetryAfter, Start: next, Count: 10,
+		}).Result()
+		switch {
+		case ctx.Err() != nil:
+			return
+		case err != nil:
+			q.failed(ctx, stream, "claiming the jobs to run again", err)
+		default:
+			next = cursor
+		}
+		for _, message := range stale {
+			if ctx.Err() != nil {
+				// The rest are claimed: they run again after RetryAfter.
+				return
+			}
+			handle(ctx, q, stream, message, true, run)
+		}
+
+		streams, err := q.client.XReadGroup(ctx, &redis.XReadGroupArgs{
+			Group: group, Consumer: consumer, Streams: []string{stream, ">"}, Count: 1, Block: wait,
+		}).Result()
+		switch {
+		case errors.Is(err, redis.Nil) || ctx.Err() != nil:
+			continue
+		case err != nil:
+			q.failed(ctx, stream, "reading new jobs", err)
+			sleep(ctx, wait)
+			continue
+		}
+		for _, read := range streams {
+			for _, message := range read.Messages {
+				handle(ctx, q, stream, message, false, run)
+			}
+		}
+	}
+}
+
+// failed logs a Redis error of the worker of stream. A group Redis lost, when it restarted
+// without its data or was emptied, is created again, so the worker goes on running new jobs.
+func (q *Queue) failed(ctx context.Context, stream, doing string, err error) {
+	logging.Error(ctx, doing, "stream", stream, "error", err)
+	if redis.HasErrorPrefix(err, "NOGROUP") {
+		q.createGroup(ctx, stream)
+	}
+}
+
+// handle runs one job, and deletes it unless it is to run again. claimed is a job run before.
+func handle[Job any](ctx context.Context, q *Queue, stream string, message redis.XMessage, claimed bool, run func(context.Context, Job) error) {
+	if claimed {
+		runs, pending, err := q.runs(ctx, stream, message.ID)
+		switch {
+		case err != nil:
+			logging.Error(ctx, "counting a job's runs", "stream", stream, "id", message.ID, "error", err)
+			return
+		case !pending:
+			// Its last worker finished it after Redis handed it here.
+			return
+		case runs > MaxRuns:
+			logging.Error(ctx, "dropping a job that failed every run", "stream", stream, "id", message.ID, "runs", MaxRuns)
+			q.delete(ctx, stream, message.ID)
+			return
+		}
+	}
+
+	var job Job
+	payload, _ := message.Values[field].(string)
+	if err := json.Unmarshal([]byte(payload), &job); err != nil {
+		logging.Error(ctx, "dropping a job that cannot be read", "stream", stream, "id", message.ID, "error", err)
+		q.delete(ctx, stream, message.ID)
+		return
+	}
+	if err := runOnce(ctx, job, run); err != nil {
+		logging.Warn(ctx, "a job failed; it runs again later", "stream", stream, "id", message.ID, "error", err)
+		return
+	}
+	q.delete(ctx, stream, message.ID)
+}
+
+// runOnce runs job with a ctx that ends after RunFor, and returns a panic as an error: the worker
+// runs in a service's process, which a job must not bring down.
+func runOnce[Job any](ctx context.Context, job Job, run func(context.Context, Job) error) (err error) {
+	ctx, cancel := context.WithTimeout(ctx, RunFor)
+	defer cancel()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("the job panicked: %v", recovered)
+		}
+	}()
+	return run(ctx, job)
+}
+
+// runs returns how many times the job has been handed to a worker, counting this time, and
+// whether it is still to be finished.
+func (q *Queue) runs(ctx context.Context, stream, id string) (int64, bool, error) {
+	pending, err := q.client.XPendingExt(ctx, &redis.XPendingExtArgs{
+		Stream: stream, Group: group, Start: id, End: id, Count: 1,
+	}).Result()
+	if err != nil || len(pending) == 0 {
+		return 0, false, err
+	}
+	return pending[0].RetryCount, true, nil
+}
+
+// delete acknowledges a job and deletes it from the stream, so the stream holds only the jobs
+// waiting or running. A job it fails to delete is run again. It deletes the job even once ctx has
+// ended, since the job is done.
+func (q *Queue) delete(ctx context.Context, stream, id string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), wait)
+	defer cancel()
+	pipe := q.client.TxPipeline()
+	pipe.XAck(ctx, stream, group, id)
+	pipe.XDel(ctx, stream, id)
+	if _, err := pipe.Exec(ctx); err != nil {
+		logging.Error(ctx, "deleting a job", "stream", stream, "id", id, "error", err)
+	}
+}
+
+// createGroup creates stream and its group unless they exist, and says whether they do now. The
+// group starts at the stream's first job, so jobs put on it before any worker started are run.
+func (q *Queue) createGroup(ctx context.Context, stream string) bool {
+	err := q.client.XGroupCreateMkStream(ctx, stream, group, "0").Err()
+	if err != nil && !redis.HasErrorPrefix(err, "BUSYGROUP") {
+		if ctx.Err() == nil {
+			logging.Error(ctx, "creating the workers' group", "stream", stream, "error", err)
+		}
+		return false
+	}
+	return true
+}
+
+// consumerName names this worker to Redis: its host, which is the container in the stack.
+func consumerName() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		return fmt.Sprintf("worker-%d", os.Getpid())
+	}
+	return "worker-" + host
+}
+
+// sleep waits for d, and says whether ctx is still alive.
+func sleep(ctx context.Context, d time.Duration) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	case <-time.After(d):
+		return true
+	}
+}

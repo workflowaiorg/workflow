@@ -1,3 +1,8 @@
 module [[ .module ]]
 
 go 1.25
+[[- if .queue ]]
+
+// The last go-redis that builds with Go 1.25; a newer one needs Go 1.26.
+require github.com/redis/go-redis/v9 v9.22.0
+[[- end ]]

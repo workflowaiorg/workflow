@@ -14,10 +14,18 @@ services:
       - ./:/app
       - go-modules:/go/pkg/mod
       - go-build:/root/.cache/go-build
-[[- if .postgres ]]
+[[- if or .postgres .queue ]]
     depends_on:
+[[- end ]]
+[[- if .postgres ]]
       migrate:
         condition: service_completed_successfully
+[[- end ]]
+[[- if .queue ]]
+      redis:
+        condition: service_healthy
+[[- end ]]
+[[- if .postgres ]]
 
   postgres:
     image: postgres:18-alpine
@@ -57,10 +65,27 @@ services:
       - go-modules:/go/pkg/mod
       - go-build:/root/.cache/go-build
 [[- end ]]
+[[- if .queue ]]
+
+  # The queue's jobs. Every write is on disk before Redis answers, so a job put on the queue is not
+  # lost when Redis stops; and Redis refuses a write rather than evict a job when its memory is full.
+  redis:
+    image: redis:8-alpine
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "always", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      retries: 30
+[[- end ]]
 
 volumes:
   go-modules:
   go-build:
 [[- if .postgres ]]
   postgres-data:
+[[- end ]]
+[[- if .queue ]]
+  redis-data:
 [[- end ]]

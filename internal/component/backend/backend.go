@@ -18,9 +18,9 @@ import (
 )
 
 // files holds base/, the backend's part of .agents/base, and skeleton/, what a project is given
-// once: go.mod, pkg/ and a first service; postgres/ holds the same two for the postgres option.
+// once: go.mod, pkg/ and a first service; postgres/ and queue/ hold the same two for their options.
 //
-//go:embed all:base all:skeleton all:postgres
+//go:embed all:base all:skeleton all:postgres all:queue
 var files embed.FS
 
 // Component is the backend, as wf add backend installs it.
@@ -32,6 +32,10 @@ var Component = component.Component{
 		{
 			Name: "postgres", Question: "Keep data in PostgreSQL", Bool: true, Default: "false",
 			Part: component.Part{Base: sub("postgres/base"), Skeleton: sub("postgres/skeleton")},
+		},
+		{
+			Name: "queue", Question: "Run jobs in the background, on a Redis queue", Bool: true, Default: "false",
+			Part: component.Part{Base: sub("queue/base"), Skeleton: sub("queue/skeleton")},
 		},
 	},
 	Part: component.Part{

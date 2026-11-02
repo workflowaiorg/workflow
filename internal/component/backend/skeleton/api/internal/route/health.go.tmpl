@@ -3,6 +3,8 @@
 package route
 
 import (
+	"context"
+
 	"github.com/gin-gonic/gin"
 
 	"[[ .module ]]/api/internal/app"
@@ -11,8 +13,8 @@ import (
 )
 
 // RegisterHealthRoutes serves GET /health. A domain that opens a gateway or a repository returns
-// the error when that fails; this one opens nothing.
-func RegisterHealthRoutes(application *app.App, r gin.IRouter) error {
+// the error when that fails; this one opens nothing. ctx ends when the service is told to stop.
+func RegisterHealthRoutes(ctx context.Context, application *app.App, r gin.IRouter) error {
 	ctrl := healthctrl.New()
 	handler := healthhttp.New(ctrl)
 	r.GET("/health", handler.Show)

@@ -264,22 +264,22 @@ func TestAddListsAComponentsOptions(t *testing.T) {
 	}
 }
 
-// TestAProjectWithTheBackendBuildsAndPasses adds the backend to a new project, then downloads the
-// modules its code imports and runs go vet and go test there, as a developer would. It needs the
-// network, so -short skips it.
+// TestAProjectWithTheBackendBuildsAndPasses adds the backend to a new project, with no option and
+// with every one, then downloads the modules its code imports and runs go vet and go test there, as
+// a developer would. It needs the network, so -short skips it.
 func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 	if testing.Short() {
 		t.Skip("downloads modules")
 	}
-	for _, postgres := range []bool{false, true} {
-		t.Run(fmt.Sprintf("postgres %v", postgres), func(t *testing.T) {
+	for _, every := range []bool{false, true} {
+		t.Run(fmt.Sprintf("every option %v", every), func(t *testing.T) {
 			dir := t.TempDir()
 			app := cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
 			if code, _, stderr := runWith(t, app, "init", "--forge=gitlab"); code != 0 {
 				t.Fatalf("wf init exited %d: %s", code, stderr)
 			}
 			app = cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
-			code, _, stderr := runWith(t, app, "add", "backend", "--module=example.com/shop", fmt.Sprintf("--postgres=%v", postgres))
+			code, _, stderr := runWith(t, app, "add", "backend", "--module=example.com/shop", fmt.Sprintf("--postgres=%v", every), fmt.Sprintf("--queue=%v", every))
 			if code != 0 {
 				t.Fatalf("wf add backend exited %d: %s", code, stderr)
 			}
@@ -291,12 +291,17 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 					t.Errorf("the %s skill was not installed: %v", skill, err)
 				}
 			}
-			if _, err := os.Stat(filepath.Join(dir, ".claude/skills/database/SKILL.md")); (err == nil) != postgres {
-				t.Errorf("with postgres %v, the database skill is installed = %v", postgres, err == nil)
+			for _, skill := range []string{"database", "queue"} {
+				if _, err := os.Stat(filepath.Join(dir, ".claude/skills", skill, "SKILL.md")); (err == nil) != every {
+					t.Errorf("with every option %v, the %s skill is installed = %v", every, skill, err == nil)
+				}
 			}
 
 			t.Setenv("GOWORK", "off")
 			t.Setenv("GOFLAGS", "")
+			// The project's own Go version, as CI has it: a module that needs a newer Go fails here
+			// rather than upgrading the toolchain unseen.
+			t.Setenv("GOTOOLCHAIN", "local")
 			for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {
 				command := exec.Command("go", args...)
 				command.Dir = dir
@@ -304,8 +309,10 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 					t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
 				}
 			}
-			if got := strings.Contains(read(t, dir, "go.mod"), "github.com/uptrace/bun"); got != postgres {
-				t.Errorf("with postgres %v, go.mod requires bun = %v", postgres, got)
+			for _, module := range []string{"github.com/uptrace/bun", "github.com/redis/go-redis/v9"} {
+				if got := strings.Contains(read(t, dir, "go.mod"), module); got != every {
+					t.Errorf("with every option %v, go.mod requires %s = %v", every, module, got)
+				}
 			}
 		})
 	}
