@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -16,18 +17,20 @@ import (
 
 // options is which of the backend's options are chosen.
 type options struct {
-	postgres, queue bool
+	postgres, queue, agents bool
 }
 
-// everyChoice is every way the options can be chosen.
-var everyChoice = []options{{}, {postgres: true}, {queue: true}, {postgres: true, queue: true}}
+// everyChoice is no option, each one alone, and all of them.
+var everyChoice = []options{{}, {postgres: true}, {queue: true}, {agents: true}, {postgres: true, queue: true, agents: true}}
 
 // written renders the backend's skeleton for the module example.com/shop into a new directory,
 // with the options chosen.
 func written(t *testing.T, chosen options) string {
 	t.Helper()
 	dir := t.TempDir()
-	answers := map[string]any{"module": "example.com/shop", "postgres": chosen.postgres, "queue": chosen.queue}
+	answers := map[string]any{
+		"module": "example.com/shop", "postgres": chosen.postgres, "queue": chosen.queue, "llm-agents": chosen.agents,
+	}
 	if _, err := base.ComponentSkeleton(dir, backend.Component, answers); err != nil {
 		t.Fatal(err)
 	}
@@ -219,6 +222,41 @@ func TestTheServiceWaitsForEveryStoreItUses(t *testing.T) {
 			if !strings.Contains(string(compose), want) {
 				t.Errorf("with %+v, docker-compose.yaml does not hold %q:\n%s", test.chosen, want, compose)
 			}
+		}
+	}
+}
+
+func TestTheAgentsExistOnlyWhenChosen(t *testing.T) {
+	for _, agents := range []bool{false, true} {
+		dir := written(t, options{agents: agents})
+		for _, name := range []string{"pkg/llmgateway/llmgateway.go", "agents/summary/cmd/a2a/main.go", "agents/boundary_test.go", ".env.example"} {
+			if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != agents {
+				t.Errorf("with llm-agents %v, %s exists = %v", agents, name, err == nil)
+			}
+		}
+		// What each file holds of the agents, when they are chosen.
+		marks := map[string]string{
+			"docker-compose.yaml": "./agents/summary/cmd/a2a",
+			"go.mod":              "github.com/a2aproject/a2a-go/v2",
+		}
+		for name, mark := range marks {
+			content, err := os.ReadFile(filepath.Join(dir, name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(content), mark); got != agents {
+				t.Errorf("with llm-agents %v, %s holds %s = %v:\n%s", agents, name, mark, got, content)
+			}
+		}
+	}
+}
+
+func TestTheAgentsAskForDotEnvToBeIgnored(t *testing.T) {
+	for _, agents := range []bool{false, true} {
+		edits := backend.Component.Edits(map[string]any{"module": "example.com/shop", "llm-agents": agents})
+		got := slices.ContainsFunc(edits, func(edit string) bool { return strings.HasPrefix(edit, "add .env to .gitignore") })
+		if got != agents {
+			t.Errorf("with llm-agents %v, the edits ask for .env in .gitignore = %v: %q", agents, got, edits)
 		}
 	}
 }

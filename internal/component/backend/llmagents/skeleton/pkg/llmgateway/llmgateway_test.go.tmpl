@@ -1,0 +1,102 @@
+package llmgateway_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/llmgateway"
+)
+
+// provider is a stand-in for a Responses API provider: it answers every call with status and
+// answer, and keeps the last request it was sent.
+type provider struct {
+	*httptest.Server
+	request map[string]any
+}
+
+func newProvider(t *testing.T, code int, status, answer string) *provider {
+	t.Helper()
+	p := &provider{}
+	p.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		assert.Equal(t, "/responses", r.URL.Path)
+		assert.Equal(t, "Bearer test-key", r.Header.Get("Authorization"))
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&p.request))
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		_ = json.NewEncoder(w).Encode(response(status, answer))
+	}))
+	t.Cleanup(p.Close)
+	return p
+}
+
+// response is a Responses API answer of status, with answer as its text.
+func response(status, answer string) map[string]any {
+	return map[string]any{
+		"id": "resp_1", "object": "response", "model": "test-model", "status": status,
+		"incomplete_details": map[string]any{"reason": "max_output_tokens"},
+		"usage":              map[string]any{"input_tokens": 12, "output_tokens": 3, "total_tokens": 15},
+		"output": []any{map[string]any{
+			"type": "message", "role": "assistant",
+			"content": []any{map[string]any{"type": "output_text", "text": answer}},
+		}},
+	}
+}
+
+func TestCompleteTextReturnsTheAnswerAndItsCost(t *testing.T) {
+	p := newProvider(t, http.StatusOK, "completed", "Hello, Ada.")
+	completer := llmgateway.New("test-key", p.URL, "test-model")
+
+	answer, usage, err := completer.CompleteText(t.Context(), "Greet the user.", "I am Ada.")
+	require.NoError(t, err)
+	assert.Equal(t, "Hello, Ada.", answer)
+	assert.Equal(t, llmgateway.Usage{PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15}, usage)
+	assert.Equal(t, "test-model", p.request["model"])
+	assert.Equal(t, "Greet the user.", p.request["instructions"])
+	assert.Equal(t, "I am Ada.", p.request["input"])
+}
+
+func TestCompleteAsksForTheSchema(t *testing.T) {
+	p := newProvider(t, http.StatusOK, "completed", `{"name":"Ada"}`)
+	schema := map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}}
+
+	answer, _, err := llmgateway.New("test-key", p.URL, "test-model").Complete(t.Context(), "Find the name.", "I am Ada.", "person", schema)
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"name":"Ada"}`, answer)
+	format := p.request["text"].(map[string]any)["format"].(map[string]any)
+	assert.Equal(t, "json_schema", format["type"])
+	assert.Equal(t, "person", format["name"])
+	assert.Equal(t, "object", format["schema"].(map[string]any)["type"])
+}
+
+func TestAFailedCallIsABadGateway(t *testing.T) {
+	tests := []struct {
+		name   string
+		code   int
+		status string
+	}{
+		{name: "the provider fails", code: http.StatusBadRequest, status: "failed"},
+		{name: "the answer was cut short", code: http.StatusOK, status: "incomplete"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			p := newProvider(t, test.code, test.status, "Hel")
+
+			_, _, err := llmgateway.New("test-key", p.URL, "test-model").CompleteText(t.Context(), "Greet the user.", "I am Ada.")
+			var apiErr *errors.APIError
+			require.True(t, errors.As(err, &apiErr), "error %v is not an APIError", err)
+			assert.Equal(t, errors.CodeBadGateway, apiErr.Code)
+		})
+	}
+}
+
+func TestUsageAdds(t *testing.T) {
+	first := llmgateway.Usage{PromptTokens: 1, CompletionTokens: 2, TotalTokens: 3}
+	second := llmgateway.Usage{PromptTokens: 10, CompletionTokens: 20, TotalTokens: 30}
+	assert.Equal(t, llmgateway.Usage{PromptTokens: 11, CompletionTokens: 22, TotalTokens: 33}, first.Add(second))
+}

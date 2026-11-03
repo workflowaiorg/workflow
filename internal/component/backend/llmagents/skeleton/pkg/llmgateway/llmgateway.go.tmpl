@@ -1,0 +1,91 @@
+// Package llmgateway is the one place the backend talks to a language model: the Responses API,
+// through the OpenAI Go SDK. Every provider that serves that API works, so changing provider is a
+// base URL and a model name in config, never a code change.
+package llmgateway
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/responses"
+
+	"[[ .module ]]/pkg/errors"
+)
+
+// Usage is the tokens one call, or several added up, cost.
+type Usage struct {
+	PromptTokens     int64
+	CompletionTokens int64
+	TotalTokens      int64
+}
+
+// Add returns u with other's tokens added: a turn that makes two calls costs both.
+func (u Usage) Add(other Usage) Usage {
+	return Usage{
+		PromptTokens:     u.PromptTokens + other.PromptTokens,
+		CompletionTokens: u.CompletionTokens + other.CompletionTokens,
+		TotalTokens:      u.TotalTokens + other.TotalTokens,
+	}
+}
+
+// Completer makes one call to the model. Both methods return the call's Usage, and every error
+// they return is an APIError with CodeBadGateway.
+type Completer struct {
+	client openai.Client
+	model  string
+}
+
+// New returns the Completer of the provider at baseURL, calling model. It opens no connection.
+func New(apiKey, baseURL, model string) *Completer {
+	return &Completer{
+		client: openai.NewClient(option.WithAPIKey(apiKey), option.WithBaseURL(baseURL)),
+		model:  model,
+	}
+}
+
+// Model is the name of the model the Completer calls.
+func (c *Completer) Model() string {
+	return c.model
+}
+
+// CompleteText returns the model's answer to prompt, given instructions. An empty answer is not an
+// error: the call ran and cost tokens, so the caller decides what an empty answer means.
+func (c *Completer) CompleteText(ctx context.Context, instructions, prompt string) (string, Usage, error) {
+	return c.call(ctx, instructions, prompt, responses.ResponseTextConfigParam{})
+}
+
+// Complete returns the model's answer to prompt as JSON that matches schema, a JSON Schema named
+// schemaName in snake_case.
+func (c *Completer) Complete(ctx context.Context, instructions, prompt, schemaName string, schema map[string]any) (string, Usage, error) {
+	return c.call(ctx, instructions, prompt, responses.ResponseTextConfigParam{
+		Format: responses.ResponseFormatTextConfigUnionParam{
+			OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{Name: schemaName, Schema: schema},
+		},
+	})
+}
+
+func (c *Completer) call(ctx context.Context, instructions, prompt string, text responses.ResponseTextConfigParam) (string, Usage, error) {
+	response, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
+		Model:        c.model,
+		Instructions: openai.String(instructions),
+		Input:        responses.ResponseNewParamsInputUnion{OfString: openai.String(prompt)},
+		Text:         text,
+	})
+	if err != nil {
+		return "", Usage{}, errors.New(errors.CodeBadGateway, "The model could not answer", err)
+	}
+	usage := Usage{
+		PromptTokens:     response.Usage.InputTokens,
+		CompletionTokens: response.Usage.OutputTokens,
+		TotalTokens:      response.Usage.TotalTokens,
+	}
+	// A provider that stops early, at its token limit say, answers with what it wrote so far:
+	// read as a whole answer, it would be a wrong one.
+	if response.Status != "" && response.Status != responses.ResponseStatusCompleted {
+		cause := fmt.Errorf("status %s, reason %q", response.Status, response.IncompleteDetails.Reason)
+		return "", usage, errors.New(errors.CodeBadGateway, "The model did not finish its answer", cause)
+	}
+	return response.OutputText(), usage, nil
+}

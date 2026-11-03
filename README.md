@@ -342,6 +342,37 @@ by default. With it, the backend also has:
 The worker's tests run on [miniredis](https://github.com/alicebob/miniredis), an in-process Redis,
 so `go test ./...` needs no Redis running.
 
+#### With LLM agents
+
+```sh
+wf add backend --module=github.com/acme/shop --llm-agents
+```
+
+For work done by a language model: an agent is a service that gets everything it needs in a call,
+asks the model, and answers with what it made. Other services call it over
+[A2A](https://a2a-protocol.org). `--llm-agents` is asked when you leave it out, and is no by
+default. With it, the backend also has:
+
+| What | Where |
+|---|---|
+| the one way to call a model: the Responses API through the [OpenAI Go SDK](https://github.com/openai/openai-go), with every failure a `BAD_GATEWAY` and the tokens each call cost | `pkg/llmgateway/` |
+| an example agent that summarises a text, with its card, its tests and its settings | `agents/summary/` |
+| a test that fails when an agent imports a database, a queue, or a package of the project it may not | `agents/boundary_test.go` |
+| a `summary` service, on port 8001 | `docker-compose.yaml` |
+| the model's settings, to copy to `.env` | `.env.example` |
+| the `llm-agents` skill, and an agents section in `AGENTS.md` | `.agents/base/` |
+
+The agent reads its model from `.env`, which holds your API key: add `.env` to `.gitignore`, as
+`wf add` reminds you, then fill it in. The agent stops at start when `LLM_MODEL` is not set.
+
+```sh
+cp .env.example .env    # then set LLM_API_KEY and LLM_MODEL, and LLM_BASE_URL for another provider
+docker compose up -d
+curl http://localhost:8001/.well-known/agent-card.json
+```
+
+No test calls a real model: they answer from a stand-in server, so `go test ./...` costs nothing.
+
 ## Settings: .wf.yml
 
 ```yaml
@@ -386,7 +417,7 @@ components:
 - `doctor:` is optional. A component's checks come before yours. A command YAML would read as
   something else, such as `false`, goes in quotes: `run: "false"`.
 - `components:` is written by `wf add`. An answer the skills only quote can be edited here, then
-  `wf sync`. An option that adds files, such as the backend's `postgres` or `queue`, is chosen
+  `wf sync`. An option that adds files, such as the backend's `postgres`, `queue` or `llm-agents`, is chosen
   when the component is added: turning it on here adds none of them, and `wf sync --check` fails.
 
 ## Commands

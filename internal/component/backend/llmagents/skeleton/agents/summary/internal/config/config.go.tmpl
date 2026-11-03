@@ -1,0 +1,38 @@
+// Package config is everything the agent reads from its environment, read once at start.
+package config
+
+import "os"
+
+// Config is the agent's settings.
+type Config struct {
+	// Port is the port the agent listens on: PORT, or 8000.
+	Port string
+	// URL is where callers reach the agent, as its card says: AGENT_URL, or the local stack's.
+	URL string
+
+	// LLMAPIKey is the model provider's API key: LLM_API_KEY. A provider run locally may need none.
+	LLMAPIKey string
+	// LLMBaseURL is the provider's Responses API: LLM_BASE_URL, or OpenAI's. It is what picks the
+	// provider.
+	LLMBaseURL string
+	// LLMModel is the model the agent calls: LLM_MODEL, which is required.
+	LLMModel string
+}
+
+// Load reads the settings from the environment. It is the only place the agent reads it.
+func Load() *Config {
+	return &Config{
+		Port:       getenv("PORT", "8000"),
+		URL:        getenv("AGENT_URL", "http://summary:8000"),
+		LLMAPIKey:  os.Getenv("LLM_API_KEY"),
+		LLMBaseURL: getenv("LLM_BASE_URL", "https://api.openai.com/v1"),
+		LLMModel:   os.Getenv("LLM_MODEL"),
+	}
+}
+
+func getenv(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return fallback
+}

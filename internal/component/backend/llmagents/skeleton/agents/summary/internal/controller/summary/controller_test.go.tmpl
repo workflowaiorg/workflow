@@ -1,0 +1,57 @@
+package summary_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/agents/summary/internal/controller/summary"
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/llmgateway"
+)
+
+// model is a stand-in for the Gateway: it answers with answer and err, and keeps what it was asked.
+type model struct {
+	answer               string
+	err                  error
+	instructions, prompt string
+}
+
+func (m *model) Complete(_ context.Context, instructions, prompt string) (string, llmgateway.Usage, error) {
+	m.instructions, m.prompt = instructions, prompt
+	return m.answer, llmgateway.Usage{TotalTokens: 15}, m.err
+}
+
+func TestSummariseAsksTheModel(t *testing.T) {
+	llm := &model{answer: "A short text."}
+
+	got, usage, err := summary.New(llm).Summarise(t.Context(), "A long text.")
+	require.NoError(t, err)
+	assert.Equal(t, "A short text.", got)
+	assert.Equal(t, int64(15), usage.TotalTokens)
+	assert.Equal(t, "A long text.", llm.prompt)
+	assert.Contains(t, llm.instructions, "Summarise")
+}
+
+func TestSummariseFails(t *testing.T) {
+	tests := []struct {
+		name string
+		text string
+		err  error
+		want errors.Code
+	}{
+		{name: "no text", text: " \n", want: errors.CodeInvalidRequest},
+		{name: "the model fails", text: "A long text.", err: errors.New(errors.CodeBadGateway, "down", nil), want: errors.CodeBadGateway},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, _, err := summary.New(&model{err: test.err}).Summarise(t.Context(), test.text)
+
+			var apiErr *errors.APIError
+			require.True(t, errors.As(err, &apiErr), "error %v is not an APIError", err)
+			assert.Equal(t, test.want, apiErr.Code)
+		})
+	}
+}

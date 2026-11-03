@@ -1,0 +1,37 @@
+// Package summary writes short summaries of texts.
+package summary
+
+import (
+	"context"
+	"strings"
+
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/llmgateway"
+)
+
+// Gateway is the model, as the controller needs it.
+type Gateway interface {
+	Complete(ctx context.Context, instructions, prompt string) (string, llmgateway.Usage, error)
+}
+
+// Controller writes summaries with its model.
+type Controller struct {
+	llm Gateway
+}
+
+// New returns the Controller of llm.
+func New(llm Gateway) *Controller {
+	return &Controller{llm: llm}
+}
+
+// Summarise returns a summary of text, and what writing it cost.
+func (c *Controller) Summarise(ctx context.Context, text string) (string, llmgateway.Usage, error) {
+	if strings.TrimSpace(text) == "" {
+		return "", llmgateway.Usage{}, errors.New(errors.CodeInvalidRequest, "There is no text to summarise", nil)
+	}
+	return c.llm.Complete(ctx, instructions, text)
+}
+
+// instructions tell the model how to summarise.
+const instructions = `Summarise the text you are given in one or two sentences, in the language it is written in.
+Answer with the summary alone.`

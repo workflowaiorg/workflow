@@ -1,0 +1,44 @@
+package main
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"[[ .module ]]/agents/summary/internal/config"
+	"[[ .module ]]/agents/summary/internal/route"
+	"[[ .module ]]/pkg/logging"
+)
+
+func main() {
+	logging.Init()
+	cfg := config.Load()
+	// Every provider needs a model; a key, a provider run locally may not.
+	if cfg.LLMModel == "" {
+		logging.Error(context.Background(), "LLM_MODEL is not set: name the model the agent calls")
+		os.Exit(1)
+	}
+	// ctx ends on SIGINT or SIGTERM: the server then drains its calls.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	server := &http.Server{Addr: ":" + cfg.Port, Handler: route.Register(cfg), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		logging.Info(ctx, "listening", "addr", server.Addr, "model", cfg.LLMModel)
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logging.Error(ctx, "listening", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	shutdown, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdown); err != nil {
+		logging.Error(shutdown, "shutting down", "error", err)
+	}
+}
