@@ -92,18 +92,19 @@ type Target struct {
 }
 
 // Resolve returns what runs the command args, downloading the pinned version when it is not cached
-// yet. The wf running runs itself when told to, for wf lock, in a directory with no .wf.yml or no
-// pin, and when it is the version pinned.
+// yet. The wf running runs itself when told to, for wf lock and wf update --to, in a directory with
+// no .wf.yml or no pin, and when it is the version pinned.
 func (l *Launcher) Resolve(args []string) (Target, error) {
-	// wf lock writes the .wf.sum a handover needs, so it is never handed over.
-	if l.NoLaunch || (len(args) > 0 && args[0] == "lock") {
+	// wf lock writes the .wf.sum a handover needs, and wf update --to moves the pin a handover
+	// reads, so neither is handed over.
+	if l.NoLaunch || (len(args) > 0 && (args[0] == "lock" || args[0] == "update" && movesPin(args[1:]))) {
 		return Target{}, nil
 	}
 	pin, _, err := readPin(l.Dir)
 	if err != nil || pin == "" || pin == l.Version {
 		return Target{}, err
 	}
-	if err := checkVersion(pin); err != nil {
+	if err := CheckVersion(pin); err != nil {
 		return Target{}, err
 	}
 	if !slices.Contains(Platforms, l.Platform) {
@@ -184,7 +185,16 @@ func readPin(dir string) (string, bool, error) {
 	return named.WF, true, nil
 }
 
-func checkVersion(pin string) error {
+// movesPin is whether wf update's args hold --to, which flag also reads as -to.
+func movesPin(args []string) bool {
+	return slices.ContainsFunc(args, func(arg string) bool {
+		name, _, _ := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+		return strings.HasPrefix(arg, "-") && name == "to"
+	})
+}
+
+// CheckVersion fails when pin is not a release version.
+func CheckVersion(pin string) error {
 	if !versionPattern.MatchString(pin) {
 		return project.UserErrorf("%s: wf: %s is not a release version, such as 0.1.0", project.ConfigFile, pin)
 	}

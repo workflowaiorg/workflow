@@ -80,7 +80,7 @@ func (l *Launcher) Lock() (LockResult, error) {
 	case pin == "":
 		return LockResult{}, project.UserErrorf("%s pins no wf version; add wf: and the version wf version prints, such as wf: 0.1.0", project.ConfigFile)
 	}
-	if err := checkVersion(pin); err != nil {
+	if err := CheckVersion(pin); err != nil {
 		return LockResult{}, err
 	}
 	recorded, err := readSum(l.Dir)

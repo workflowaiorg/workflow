@@ -72,6 +72,9 @@ WF_NO_LAUNCH=1 wf sync
 
 Then the files it writes may differ from everyone else's.
 
+**To move to a newer wf**, run [`wf update --to <version>`](#wf-update---to-version) and commit
+what it changes.
+
 ## Start in a project
 
 Run this at the root of the repository:
@@ -463,7 +466,8 @@ wf_0.2.0_linux_amd64.tar.gz sha256:…
 wf_0.2.0_linux_arm64.tar.gz sha256:…
 ```
 
-Run it after `wf init`, and again each time you change `wf:` in `.wf.yml`. It keeps only the
+Run it after `wf init`, and again each time you change `wf:` in `.wf.yml` by hand; `wf update --to`
+runs it for you. It keeps only the
 pinned version's lines.
 
 - If `.wf.sum` already holds them, it does nothing and needs no internet.
@@ -472,6 +476,27 @@ pinned version's lines.
 
 `wf lock` always runs as the wf you installed, never as the pinned version: it writes the file the
 pinned version is checked against. Don't edit `.wf.sum` by hand.
+
+### `wf update [--to <version>]`
+
+Moves the project to another wf version:
+
+```sh
+wf update --to 0.2.0
+git diff        # read what changed, then commit it as any other change
+```
+
+1. It pins `wf: 0.2.0` in `.wf.yml`, keeping your other settings and comments, and records the
+   version's fingerprints in `.wf.sum`, as `wf lock` does. If the version has no release, it
+   changes nothing.
+2. Then wf 0.2.0 replaces `.agents/base/` with its own and runs `wf sync`. `.agents/project/` is
+   never touched.
+3. For each of your parts whose wf part changed, it prints a line such as
+   `check    .agents/project/skills/workflow/SKILL.md`. Read the two together with
+   `wf show workflow`: your part may now repeat or contradict wf's.
+
+It commits nothing. Without `--to`, it does steps 2 and 3 for the version already pinned: run that
+after moving `wf:` by hand, or after a bot moved it and ran `wf lock`.
 
 ### `wf sync`
 

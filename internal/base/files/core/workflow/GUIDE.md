@@ -51,6 +51,7 @@ developer's own request starts with `Hotfix:`.
 | `wf init [--forge <forge>]` | start using wf: `.wf.yml`, `.agents/base`, and every assistant's files |
 | `wf add [<component>]` | list the components wf carries, or add one: its part of `.agents/base`, its files, its answers in `.wf.yml`; `-h` after its name lists its options |
 | `wf lock` | record in `.wf.sum` what the pinned wf's download must look like; run it after changing `wf:` in `.wf.yml`, and commit `.wf.sum` |
+| `wf update [--to <version>]` | move to another wf: pin it, then replace `.agents/base` with its own and sync; names each part of the project's whose wf part changed; commits nothing |
 | `wf sync` | write every assistant's files from `.agents/base` and `.agents/project` |
 | `wf sync --check` | write nothing; fail, naming the file, when a generated file or `.agents/base` differs from what this version of wf writes |
 | `wf show <skill> [--base]` | print a skill as an assistant reads it, or wf's part alone |

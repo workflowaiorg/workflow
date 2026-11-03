@@ -59,6 +59,9 @@ type App struct {
 	now        func() time.Time
 	// releases is where wf lock reads a release's checksums from.
 	releases string
+	// exec hands the command over to another version of wf, with environ; nil when this wf cannot.
+	exec    Exec
+	environ []string
 }
 
 // New returns wf's command line, reporting version, working on the project at dir, reading answers
@@ -69,6 +72,7 @@ func New(version, dir string, stdin io.Reader, stdout, stderr io.Writer) *App {
 		{Name: "init", Usage: "wf init [--forge <forge>]", Summary: "Start using wf in this project: .wf.yml, the base, and every assistant's files", run: runInit},
 		{Name: "add", Usage: "wf add [<component>] [--<option> …] [--force]", Summary: "Add a component to the project; with no component, list them", run: runAdd},
 		{Name: "lock", Usage: "wf lock", Summary: "Record the pinned wf release's fingerprints in .wf.sum, which every download of it is checked against", run: runLock},
+		{Name: "update", Usage: "wf update [--to <version>]", Summary: "Bring in the pinned wf's base and sync; --to pins that version first", run: runUpdate},
 		{Name: "sync", Usage: "wf sync [--check | --force]", Summary: "Write every assistant's files from .agents; --check only compares", run: runSync},
 		{Name: "show", Usage: "wf show <skill> [--base]", Summary: "Print a skill as an assistant reads it; --base for wf's part alone", run: runShow},
 		{Name: "worktree", Usage: "wf worktree <issue> <slug> | wf worktree plan <slug>", Summary: "Give an Issue or a plan its own worktree, or find it; prints its path last", run: runWorktree},
