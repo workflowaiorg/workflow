@@ -39,5 +39,7 @@ func Main(version, dir string, args, environ []string, stdin io.Reader, stdout, 
 			return exitFailure
 		}
 	}
-	return New(version, dir, stdin, stdout, stderr).Run(args)
+	app := New(version, dir, stdin, stdout, stderr)
+	app.exec, app.environ = exec, environ
+	return app.Run(args)
 }

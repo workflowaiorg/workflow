@@ -383,6 +383,41 @@ func WithComponent(dir, name string, answers map[string]any) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
+// WithPin returns the .wf.yml of the project at dir pinning wf version, and writes nothing. As with
+// WithComponent, the settings and comments stay, and the file is written back whole.
+func WithPin(dir, version string) ([]byte, error) {
+	content, err := ReadText(filepath.Join(dir, ConfigFile))
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", ConfigFile, err)
+	}
+	var doc yaml.Node
+	if err := yaml.Unmarshal(content, &doc); err != nil {
+		return nil, UserErrorf("reading %s: %v", ConfigFile, err)
+	}
+	if len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return nil, UserErrorf("%s holds no settings", ConfigFile)
+	}
+	pin := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: version}
+	if existing := mappingValue(doc.Content[0], "wf"); existing != nil {
+		pin.LineComment = existing.LineComment
+		*existing = *pin
+	} else {
+		root := doc.Content[0]
+		root.Content = append([]*yaml.Node{{Kind: yaml.ScalarNode, Value: "wf"}, pin}, root.Content...)
+	}
+
+	var out bytes.Buffer
+	encoder := yaml.NewEncoder(&out)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(&doc); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", ConfigFile, err)
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, fmt.Errorf("writing %s: %w", ConfigFile, err)
+	}
+	return out.Bytes(), nil
+}
+
 func notInFull() error {
 	return UserErrorf("%s: wf add can only add to components: written out in full; replace its alias or merge key (<<:) with the components themselves", ConfigFile)
 }

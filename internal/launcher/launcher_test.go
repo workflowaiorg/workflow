@@ -144,6 +144,16 @@ func lockedCheckout(t *testing.T, pin, cache string, r *releases) *launcher.Laun
 	return l
 }
 
+func TestUpdateWithNoPinToMoveIsHandedOver(t *testing.T) {
+	r := newReleases(t, "0.2.0")
+	for _, args := range [][]string{{"update"}, {"update", "--tox=1"}} {
+		target, err := lockedCheckout(t, "0.2.0", t.TempDir(), r).Resolve(args)
+		if err != nil || target.Version != "0.2.0" {
+			t.Errorf("Resolve(%q) = (%+v, %v), want wf 0.2.0 run", args, target, err)
+		}
+	}
+}
+
 func TestTwoCheckoutsEachRunTheVersionTheyPin(t *testing.T) {
 	r := newReleases(t, "0.2.0", "0.3.0")
 	cache := t.TempDir()
@@ -232,6 +242,8 @@ func TestTheRunningWfRunsItself(t *testing.T) {
 		{name: "its own version pinned", config: "wf: 0.1.0\n", args: []string{"sync"}},
 		{name: "WF_NO_LAUNCH", config: "wf: 0.2.0\n", args: []string{"sync"}, noLaunch: true},
 		{name: "wf lock", config: "wf: 0.2.0\n", args: []string{"lock"}},
+		{name: "wf update --to", config: "wf: 0.2.0\n", args: []string{"update", "--to", "0.3.0"}},
+		{name: "wf update -to=", config: "wf: 0.2.0\n", args: []string{"update", "-to=0.3.0"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

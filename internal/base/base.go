@@ -174,10 +174,60 @@ func Check(dir string, config project.Config, components []component.Component, 
 	if err != nil {
 		return nil, err
 	}
+	have, err := readBase(dir)
+	if err != nil {
+		return nil, err
+	}
 
+	var differences []string
+	for _, name := range slices.Sorted(maps.Keys(want)) {
+		content, ok := have[name]
+		switch {
+		case !ok:
+			differences = append(differences, fmt.Sprintf("%s/%s: missing from wf %s's base", project.BaseDir, name, version))
+		case string(content) != string(want[name]):
+			differences = append(differences, fmt.Sprintf("%s/%s: differs from wf %s's base; it is never edited — put the change in %s/%s and restore this file", project.BaseDir, name, version, project.ProjectDir, name))
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(have)) {
+		if _, ok := want[name]; !ok {
+			differences = append(differences, fmt.Sprintf("%s/%s: not part of wf %s's base; the project's own files go in %s", project.BaseDir, name, version, project.ProjectDir))
+		}
+	}
+	return differences, nil
+}
+
+// Changed returns the path under .agents/base of each file that installing the base of a project
+// on forge with components would add, change or remove in dir, and writes nothing.
+func Changed(dir, forge string, components []component.Component) ([]string, error) {
+	want, err := Files(forge, components)
+	if err != nil {
+		return nil, err
+	}
+	have, err := readBase(dir)
+	if err != nil {
+		return nil, err
+	}
+	var changed []string
+	for _, name := range slices.Sorted(maps.Keys(want)) {
+		if content, ok := have[name]; !ok || string(content) != string(want[name]) {
+			changed = append(changed, name)
+		}
+	}
+	for _, name := range slices.Sorted(maps.Keys(have)) {
+		if _, ok := want[name]; !ok {
+			changed = append(changed, name)
+		}
+	}
+	slices.Sort(changed)
+	return changed, nil
+}
+
+// readBase reads dir's .agents/base, by slash-separated path under it. A missing one has no files.
+func readBase(dir string) (map[string][]byte, error) {
 	root := filepath.Join(dir, filepath.FromSlash(project.BaseDir))
 	have := map[string][]byte{}
-	err = filepath.WalkDir(root, func(full string, entry fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(full string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -204,23 +254,7 @@ func Check(dir string, config project.Config, components []component.Component, 
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("reading %s: %w", project.BaseDir, err)
 	}
-
-	var differences []string
-	for _, name := range slices.Sorted(maps.Keys(want)) {
-		content, ok := have[name]
-		switch {
-		case !ok:
-			differences = append(differences, fmt.Sprintf("%s/%s: missing from wf %s's base", project.BaseDir, name, version))
-		case string(content) != string(want[name]):
-			differences = append(differences, fmt.Sprintf("%s/%s: differs from wf %s's base; it is never edited — put the change in %s/%s and restore this file", project.BaseDir, name, version, project.ProjectDir, name))
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(have)) {
-		if _, ok := want[name]; !ok {
-			differences = append(differences, fmt.Sprintf("%s/%s: not part of wf %s's base; the project's own files go in %s", project.BaseDir, name, version, project.ProjectDir))
-		}
-	}
-	return differences, nil
+	return have, nil
 }
 
 // readOnce adds every file in fsys to into, failing on one into has already: two parts of one
