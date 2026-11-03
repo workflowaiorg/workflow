@@ -296,12 +296,28 @@ It also brings:
 
 - the skills `architecture`, `api-design`, `configuration`, `error-handling`, `shared-packages`,
   `testing` and `go-style`, and a backend section in `AGENTS.md`;
+- the `/backend-design` command, below;
 - three gate steps for `/pre-mr-check` when Go files change: `gofmt`, `go vet ./...` and
   `go test ./...`;
 - two `wf doctor` checks: Go is installed and Docker is running.
 
 wf has no commands for the routine: the agent runs `go test`, `go mod tidy` and the rest itself, as
 the skills say. A new service is a copy of `api`, made as the `architecture` skill says.
+
+**Design the backend before building it.** Run `/backend-design` with what the system should do,
+in a few sentences:
+
+```text
+/backend-design A shop: customers order products, pay by card, and get an email when it ships.
+```
+
+The assistant asks what your description leaves open, then proposes the domains and services: what
+each does, who calls it, and what is deliberately not built. Nothing is written until you agree.
+Then it opens the Issue and lays the design out: each service as a copy of `api` with its own entry
+in `docker-compose.yaml`, each agent as a copy of `agents/summary`, each domain's first
+`.workflow/specs/<domain>/SPEC.md`, and a `## System` section in `.agents/project/AGENTS.md` that
+every later task starts from. The domains' code comes after, a
+feature per Issue.
 
 #### With PostgreSQL
 

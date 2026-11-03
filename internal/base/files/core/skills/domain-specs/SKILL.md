@@ -83,6 +83,9 @@ that built it, the skills that govern it, and whatever contracts already pin its
 write down what is true today — not what should be true. Where the two differ, the spec says what
 the code does, and the gap becomes its own Issue.
 
+A domain designed before it has code is the exception: the Issue that creates it writes its first
+spec, with only *What this domain is* and *Deliberately not built*, since nothing else is true yet.
+
 The domain's old decisions come across with it. They are already built and shipped, so there is no
 code waiting on them and nothing to block: writing them down now is transcription, not deciding.
 Each still gets [its own `[ADR]` Issue](#how-a-record-is-accepted), carrying the record word for
