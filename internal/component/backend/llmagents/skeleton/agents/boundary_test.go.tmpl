@@ -1,0 +1,70 @@
+// Package agents_test checks what every agent under agents/ may import: an agent takes what it
+// needs in its call and returns what it made, so it reaches no database, no queue and no other
+// service.
+package agents_test
+
+import (
+	"errors"
+	"fmt"
+	"os/exec"
+	"slices"
+	"strings"
+	"testing"
+)
+
+const module = "[[ .module ]]"
+
+// allowed are the project's packages an agent may import, besides its own.
+var allowed = []string{module + "/pkg/errors", module + "/pkg/logging", module + "/pkg/llmgateway"}
+
+// forbidden are the clients of databases, queues and other services.
+var forbidden = []string{
+	"database/sql", "google.golang.org/grpc", "github.com/uptrace/bun", "github.com/jackc/pgx",
+	"github.com/lib/pq", "github.com/redis/go-redis",
+}
+
+func TestAgentsImportOnlyWhatTheyMay(t *testing.T) {
+	// The project's packages are checked as imported, the clients through every dependency, so a
+	// library that wraps one is caught too.
+	for _, pkg := range list(t, "{{.ImportPath}}{{range .Imports}} {{.}}{{end}}") {
+		for _, imported := range pkg[1:] {
+			if strings.HasPrefix(imported, module+"/") && !strings.HasPrefix(imported, module+"/agents/") && !slices.Contains(allowed, imported) {
+				t.Errorf("%s imports %s, which an agent may not: it gets what it needs in its call", pkg[0], imported)
+			}
+		}
+	}
+	for _, pkg := range list(t, "{{.ImportPath}}{{range .Deps}} {{.}}{{end}}") {
+		for _, dependency := range pkg[1:] {
+			if forbids(dependency) {
+				t.Errorf("%s depends on %s, which an agent may not: it gets what it needs in its call", pkg[0], dependency)
+				break
+			}
+		}
+	}
+}
+
+// forbids says whether dependency is one of the forbidden clients, or a package of one.
+// database/sql/driver is not: a library's ID type implements its interfaces, which open nothing.
+func forbids(dependency string) bool {
+	return dependency != "database/sql/driver" && slices.ContainsFunc(forbidden, func(client string) bool {
+		return dependency == client || strings.HasPrefix(dependency, client+"/")
+	})
+}
+
+// list returns, for each package under agents/, the fields go list prints for format.
+func list(t *testing.T, format string) [][]string {
+	t.Helper()
+	out, err := exec.Command("go", "list", "-f", format, "./...").Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			err = fmt.Errorf("%w\n%s", err, exitErr.Stderr)
+		}
+		t.Fatalf("listing the agents' packages: %v", err)
+	}
+	var packages [][]string
+	for line := range strings.Lines(string(out)) {
+		packages = append(packages, strings.Fields(line))
+	}
+	return packages
+}

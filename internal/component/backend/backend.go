@@ -18,9 +18,10 @@ import (
 )
 
 // files holds base/, the backend's part of .agents/base, and skeleton/, what a project is given
-// once: go.mod, pkg/ and a first service; postgres/ and queue/ hold the same two for their options.
+// once: go.mod, pkg/ and a first service; postgres/, queue/ and llmagents/ hold the same two for
+// their options.
 //
-//go:embed all:base all:skeleton all:postgres all:queue
+//go:embed all:base all:skeleton all:postgres all:queue all:llmagents
 var files embed.FS
 
 // Component is the backend, as wf add backend installs it.
@@ -37,6 +38,10 @@ var Component = component.Component{
 			Name: "queue", Question: "Run jobs in the background, on a Redis queue", Bool: true, Default: "false",
 			Part: component.Part{Base: sub("queue/base"), Skeleton: sub("queue/skeleton")},
 		},
+		{
+			Name: "llm-agents", Question: "Build AI agents that call a language model", Bool: true, Default: "false",
+			Part: component.Part{Base: sub("llmagents/base"), Skeleton: sub("llmagents/skeleton")},
+		},
 	},
 	Part: component.Part{
 		Base:     sub("base"),
@@ -52,8 +57,12 @@ var Component = component.Component{
 		},
 	},
 	Check: checkModule,
-	Edits: func(map[string]any) []string {
-		return []string{"run go mod tidy, which downloads the modules the new code imports, then go test ./..."}
+	Edits: func(answers map[string]any) []string {
+		edits := []string{"run go mod tidy, which downloads the modules the new code imports, then go test ./..."}
+		if agents, _ := answers["llm-agents"].(bool); agents {
+			edits = append(edits, "add .env to .gitignore: it will hold the model's API key")
+		}
+		return edits
 	},
 }
 

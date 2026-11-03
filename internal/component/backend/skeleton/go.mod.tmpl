@@ -6,3 +6,11 @@ go 1.25
 // The last go-redis that builds with Go 1.25; a newer one needs Go 1.26.
 require github.com/redis/go-redis/v9 v9.22.0
 [[- end ]]
+[[- if index . "llm-agents" ]]
+
+// The last a2a-go and openai-go that build with Go 1.25; newer ones need Go 1.26.
+require (
+	github.com/a2aproject/a2a-go/v2 v2.5.0
+	github.com/openai/openai-go/v3 v3.74.0
+)
+[[- end ]]

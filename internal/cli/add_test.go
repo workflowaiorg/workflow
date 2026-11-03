@@ -279,7 +279,7 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 				t.Fatalf("wf init exited %d: %s", code, stderr)
 			}
 			app = cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
-			code, _, stderr := runWith(t, app, "add", "backend", "--module=example.com/shop", fmt.Sprintf("--postgres=%v", every), fmt.Sprintf("--queue=%v", every))
+			code, _, stderr := runWith(t, app, "add", "backend", "--module=example.com/shop", fmt.Sprintf("--postgres=%v", every), fmt.Sprintf("--queue=%v", every), fmt.Sprintf("--llm-agents=%v", every))
 			if code != 0 {
 				t.Fatalf("wf add backend exited %d: %s", code, stderr)
 			}
@@ -291,7 +291,7 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 					t.Errorf("the %s skill was not installed: %v", skill, err)
 				}
 			}
-			for _, skill := range []string{"database", "queue"} {
+			for _, skill := range []string{"database", "queue", "llm-agents"} {
 				if _, err := os.Stat(filepath.Join(dir, ".claude/skills", skill, "SKILL.md")); (err == nil) != every {
 					t.Errorf("with every option %v, the %s skill is installed = %v", every, skill, err == nil)
 				}
@@ -309,7 +309,7 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 					t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
 				}
 			}
-			for _, module := range []string{"github.com/uptrace/bun", "github.com/redis/go-redis/v9"} {
+			for _, module := range []string{"github.com/uptrace/bun", "github.com/redis/go-redis/v9", "github.com/a2aproject/a2a-go/v2", "github.com/openai/openai-go/v3"} {
 				if got := strings.Contains(read(t, dir, "go.mod"), module); got != every {
 					t.Errorf("with every option %v, go.mod requires %s = %v", every, module, got)
 				}

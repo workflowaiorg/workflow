@@ -1,0 +1,52 @@
+package openai_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/agents/summary/internal/config"
+	"[[ .module ]]/agents/summary/internal/gateway/llm/openai"
+	"[[ .module ]]/pkg/errors"
+)
+
+// provider is a stand-in for the model's provider, answering every call with answer.
+func provider(t *testing.T, answer string) *config.Config {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "resp_1", "object": "response", "model": "test-model", "status": "completed",
+			"usage": map[string]any{"input_tokens": 12, "output_tokens": 3, "total_tokens": 15},
+			"output": []any{map[string]any{
+				"type": "message", "role": "assistant",
+				"content": []any{map[string]any{"type": "output_text", "text": answer}},
+			}},
+		})
+	}))
+	t.Cleanup(server.Close)
+	return &config.Config{LLMAPIKey: "test-key", LLMBaseURL: server.URL, LLMModel: "test-model"}
+}
+
+func TestCompleteReturnsTheAnswer(t *testing.T) {
+	gateway := openai.New(provider(t, "A short text."))
+
+	answer, usage, err := gateway.Complete(t.Context(), "Summarise.", "A long text.")
+	require.NoError(t, err)
+	assert.Equal(t, "A short text.", answer)
+	assert.Equal(t, int64(15), usage.TotalTokens)
+	assert.Equal(t, "test-model", gateway.Model())
+}
+
+func TestAnEmptyAnswerIsABadGateway(t *testing.T) {
+	_, usage, err := openai.New(provider(t, "")).Complete(t.Context(), "Summarise.", "A long text.")
+
+	var apiErr *errors.APIError
+	require.True(t, errors.As(err, &apiErr), "error %v is not an APIError", err)
+	assert.Equal(t, errors.CodeBadGateway, apiErr.Code)
+	assert.Equal(t, int64(15), usage.TotalTokens, "the call's cost is lost")
+}

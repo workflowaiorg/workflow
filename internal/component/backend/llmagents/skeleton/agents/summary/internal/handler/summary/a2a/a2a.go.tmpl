@@ -1,0 +1,89 @@
+// Package a2a answers A2A calls to the summary agent.
+package a2a
+
+import (
+	"context"
+	"fmt"
+	"iter"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/llmgateway"
+	"[[ .module ]]/pkg/logging"
+)
+
+// Controller is the work the handler hands each call to.
+type Controller interface {
+	Summarise(ctx context.Context, text string) (string, llmgateway.Usage, error)
+}
+
+// Handler is the agent's a2asrv.AgentExecutor.
+type Handler struct {
+	ctrl  Controller
+	model string
+}
+
+// New returns the Handler of ctrl; model is the name of the model ctrl calls, sent back with the
+// cost of each answer.
+func New(ctrl Controller, model string) *Handler {
+	return &Handler{ctrl: ctrl, model: model}
+}
+
+// Execute answers one call.
+//
+//	in:  a DataPart of text, the text to summarise
+//	out: a DataPart of summary, with prompt_tokens, completion_tokens, total_tokens and model
+func (h *Handler) Execute(ctx context.Context, execCtx *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
+	return func(yield func(a2a.Event, error) bool) {
+		if execCtx.Message == nil || len(execCtx.Message.Parts) == 0 {
+			yield(nil, fmt.Errorf("the message has no parts: %w", a2a.ErrInvalidParams))
+			return
+		}
+		data, ok := execCtx.Message.Parts[0].Data().(map[string]any)
+		if !ok {
+			yield(nil, fmt.Errorf("the message's first part is not a DataPart: %w", a2a.ErrInvalidParams))
+			return
+		}
+		text, ok := data["text"].(string)
+		if !ok {
+			yield(nil, fmt.Errorf("text is missing or not a string: %w", a2a.ErrInvalidParams))
+			return
+		}
+
+		summary, usage, err := h.ctrl.Summarise(ctx, text)
+		if err != nil {
+			yield(nil, failed(ctx, err))
+			return
+		}
+		yield(a2a.NewMessage(a2a.MessageRoleAgent, a2a.NewDataPart(map[string]any{
+			"summary":           summary,
+			"prompt_tokens":     usage.PromptTokens,
+			"completion_tokens": usage.CompletionTokens,
+			"total_tokens":      usage.TotalTokens,
+			"model":             h.model,
+		})), nil)
+	}
+}
+
+// failed is the error the caller gets for err, the controller's: its message alone, since the
+// caller reads the error's text and the cause stays in the logs. A bad call is a2a.ErrInvalidParams,
+// so the caller can tell it from a failure of the agent.
+func failed(ctx context.Context, err error) error {
+	var apiErr *errors.APIError
+	if !errors.As(err, &apiErr) {
+		logging.Error(ctx, "summarising", "error", err)
+		return fmt.Errorf("summarising: %w", a2a.ErrInternalError)
+	}
+	if apiErr.Code == errors.CodeInvalidRequest {
+		return fmt.Errorf("%s: %w", apiErr.Message, a2a.ErrInvalidParams)
+	}
+	logging.Error(ctx, "summarising", "error", err)
+	return fmt.Errorf("%s: %w", apiErr.Message, a2a.ErrInternalError)
+}
+
+// Cancel does nothing: a call is answered in one step, so there is nothing to stop.
+func (h *Handler) Cancel(context.Context, *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
+	return func(func(a2a.Event, error) bool) {}
+}

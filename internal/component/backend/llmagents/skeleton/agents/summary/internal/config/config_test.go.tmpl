@@ -1,0 +1,28 @@
+package config_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+
+	"[[ .module ]]/agents/summary/internal/config"
+)
+
+func TestLoadDefaultsToTheLocalStack(t *testing.T) {
+	for _, key := range []string{"PORT", "AGENT_URL", "LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL"} {
+		t.Setenv(key, "")
+	}
+	assert.Equal(t, &config.Config{Port: "8000", URL: "http://summary:8000", LLMBaseURL: "https://api.openai.com/v1"}, config.Load())
+}
+
+func TestLoadReadsTheEnvironment(t *testing.T) {
+	t.Setenv("PORT", "9000")
+	t.Setenv("AGENT_URL", "http://agents.example.com/summary")
+	t.Setenv("LLM_API_KEY", "key")
+	t.Setenv("LLM_BASE_URL", "http://localhost:11434/v1")
+	t.Setenv("LLM_MODEL", "small-model")
+	assert.Equal(t, &config.Config{
+		Port: "9000", URL: "http://agents.example.com/summary",
+		LLMAPIKey: "key", LLMBaseURL: "http://localhost:11434/v1", LLMModel: "small-model",
+	}, config.Load())
+}

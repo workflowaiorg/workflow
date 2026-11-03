@@ -1,0 +1,51 @@
+// Package route wires the agent and says where it answers.
+package route
+
+import (
+	"net/http"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+
+	"[[ .module ]]/agents/summary/internal/config"
+	"[[ .module ]]/agents/summary/internal/controller/summary"
+	"[[ .module ]]/agents/summary/internal/gateway/llm/openai"
+	handler "[[ .module ]]/agents/summary/internal/handler/summary/a2a"
+)
+
+// InvokePath is where the agent answers A2A calls, over JSON-RPC.
+const InvokePath = "/invoke"
+
+// Register returns the agent's routes: its card at a2asrv.WellKnownAgentCardPath, and its calls at
+// InvokePath. The model is its one dependency, and it opens no connection.
+func Register(cfg *config.Config) http.Handler {
+	llm := openai.New(cfg)
+	executor := handler.New(summary.New(llm), llm.Model())
+
+	mux := http.NewServeMux()
+	mux.Handle(InvokePath, a2asrv.NewJSONRPCHandler(a2asrv.NewHandler(executor)))
+	mux.Handle(a2asrv.WellKnownAgentCardPath, a2asrv.NewStaticAgentCardHandler(card(cfg)))
+	return mux
+}
+
+// card is what the agent says about itself to the agents and services that call it. Its skills
+// are the work Execute does.
+func card(cfg *config.Config) *a2a.AgentCard {
+	return &a2a.AgentCard{
+		Name:        "Summary agent",
+		Description: "Summarises a text in one or two sentences.",
+		Version:     "1.0.0",
+		SupportedInterfaces: []*a2a.AgentInterface{
+			a2a.NewAgentInterface(cfg.URL+InvokePath, a2a.TransportProtocolJSONRPC),
+		},
+		DefaultInputModes:  []string{"application/json"},
+		DefaultOutputModes: []string{"application/json"},
+		Skills: []a2a.AgentSkill{{
+			ID:          "summarise",
+			Name:        "Summarise a text",
+			Description: "Takes {text} and answers {summary}, with the tokens it cost and the model.",
+			Tags:        []string{"summary"},
+			Examples:    []string{`{"text": "A long article about the history of tea."}`},
+		}},
+	}
+}

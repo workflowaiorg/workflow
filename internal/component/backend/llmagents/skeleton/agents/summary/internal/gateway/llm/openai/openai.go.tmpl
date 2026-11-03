@@ -1,0 +1,35 @@
+// Package openai is the agent's model, reached through pkg/llmgateway.
+package openai
+
+import (
+	"context"
+
+	"[[ .module ]]/agents/summary/internal/config"
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/llmgateway"
+)
+
+// Gateway asks the model for summaries.
+type Gateway struct {
+	llm *llmgateway.Completer
+}
+
+// New returns the Gateway of the model cfg names. It opens no connection.
+func New(cfg *config.Config) *Gateway {
+	return &Gateway{llm: llmgateway.New(cfg.LLMAPIKey, cfg.LLMBaseURL, cfg.LLMModel)}
+}
+
+// Model is the name of the model the Gateway calls.
+func (g *Gateway) Model() string {
+	return g.llm.Model()
+}
+
+// Complete returns the model's answer to prompt, given instructions. An empty answer is an error:
+// a summary of nothing is no summary.
+func (g *Gateway) Complete(ctx context.Context, instructions, prompt string) (string, llmgateway.Usage, error) {
+	answer, usage, err := g.llm.CompleteText(ctx, instructions, prompt)
+	if err == nil && answer == "" {
+		err = errors.New(errors.CodeBadGateway, "The model wrote no summary", nil)
+	}
+	return answer, usage, err
+}

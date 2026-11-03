@@ -79,6 +79,27 @@ services:
       interval: 2s
       retries: 30
 [[- end ]]
+[[- if index . "llm-agents" ]]
+
+  # The summary agent, which other services call over A2A at http://summary:8000. It reads the model
+  # to call from .env beside this file, which git ignores: cp .env.example .env, then fill it in.
+  summary:
+    image: golang:1.25-alpine
+    working_dir: /app
+    command: ["sh", "-c", "go build -o /tmp/summary ./agents/summary/cmd/a2a && exec /tmp/summary"]
+    stop_grace_period: 10s
+    environment:
+      AGENT_URL: http://summary:8000
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./:/app
+      - go-modules:/go/pkg/mod
+      - go-build:/root/.cache/go-build
+[[- end ]]
 
 volumes:
   go-modules:

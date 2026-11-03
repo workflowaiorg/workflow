@@ -1,0 +1,84 @@
+package a2a_test
+
+import (
+	"context"
+	stderrors "errors"
+	"testing"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	handler "[[ .module ]]/agents/summary/internal/handler/summary/a2a"
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/llmgateway"
+)
+
+// controller is a stand-in for the Controller: it answers with summary and err, and keeps the
+// text it was given.
+type controller struct {
+	summary string
+	err     error
+	text    string
+}
+
+func (c *controller) Summarise(_ context.Context, text string) (string, llmgateway.Usage, error) {
+	c.text = text
+	return c.summary, llmgateway.Usage{PromptTokens: 12, CompletionTokens: 3, TotalTokens: 15}, c.err
+}
+
+// execute runs h on a message of parts, and returns what it yielded.
+func execute(t *testing.T, h *handler.Handler, parts ...*a2a.Part) ([]a2a.Event, []error) {
+	t.Helper()
+	execCtx := &a2asrv.ExecutorContext{Message: a2a.NewMessage(a2a.MessageRoleUser, parts...)}
+	var events []a2a.Event
+	var errs []error
+	for event, err := range h.Execute(t.Context(), execCtx) {
+		events = append(events, event)
+		errs = append(errs, err)
+	}
+	return events, errs
+}
+
+func TestExecuteAnswersWithTheSummaryAndItsCost(t *testing.T) {
+	ctrl := &controller{summary: "A short text."}
+
+	events, errs := execute(t, handler.New(ctrl, "test-model"), a2a.NewDataPart(map[string]any{"text": "A long text."}))
+	require.Equal(t, []error{nil}, errs)
+	assert.Equal(t, "A long text.", ctrl.text)
+	message, ok := events[0].(*a2a.Message)
+	require.True(t, ok, "the event is a %T, not a message", events[0])
+	assert.Equal(t, map[string]any{
+		"summary": "A short text.", "prompt_tokens": int64(12), "completion_tokens": int64(3),
+		"total_tokens": int64(15), "model": "test-model",
+	}, message.Parts[0].Data())
+}
+
+func TestExecuteFails(t *testing.T) {
+	text := []*a2a.Part{a2a.NewDataPart(map[string]any{"text": "A long text."})}
+	cause := stderrors.New("dial tcp 10.0.0.7:443: connection refused")
+	tests := []struct {
+		name  string
+		parts []*a2a.Part
+		err   error
+		want  error
+	}{
+		{name: "no parts", want: a2a.ErrInvalidParams},
+		{name: "a text part", parts: []*a2a.Part{a2a.NewTextPart("A long text.")}, want: a2a.ErrInvalidParams},
+		{name: "no text", parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"body": "A long text."})}, want: a2a.ErrInvalidParams},
+		{name: "text that is not a string", parts: []*a2a.Part{a2a.NewDataPart(map[string]any{"text": 7.0})}, want: a2a.ErrInvalidParams},
+		{name: "the controller refuses the text", parts: text, err: errors.New(errors.CodeInvalidRequest, "No text", nil), want: a2a.ErrInvalidParams},
+		{name: "the model fails", parts: text, err: errors.New(errors.CodeBadGateway, "The model could not answer", cause), want: a2a.ErrInternalError},
+		{name: "the controller fails with another error", parts: text, err: cause, want: a2a.ErrInternalError},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			events, errs := execute(t, handler.New(&controller{err: test.err}, "test-model"), test.parts...)
+			require.Len(t, errs, 1)
+			require.ErrorIs(t, errs[0], test.want)
+			assert.NotContains(t, errs[0].Error(), "10.0.0.7", "the caller is sent the cause")
+			assert.Nil(t, events[0])
+		})
+	}
+}

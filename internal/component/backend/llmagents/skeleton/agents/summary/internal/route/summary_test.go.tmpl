@@ -1,0 +1,67 @@
+package route_test
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2aclient"
+	"github.com/a2aproject/a2a-go/v2/a2aclient/agentcard"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/agents/summary/internal/config"
+	"[[ .module ]]/agents/summary/internal/route"
+)
+
+// start runs the agent, calling a stand-in for the model's provider that answers every call with
+// a short text. It returns the agent's URL.
+func start(t *testing.T) string {
+	t.Helper()
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id": "resp_1", "object": "response", "model": "test-model", "status": "completed",
+			"usage": map[string]any{"input_tokens": 12, "output_tokens": 3, "total_tokens": 15},
+			"output": []any{map[string]any{
+				"type": "message", "role": "assistant",
+				"content": []any{map[string]any{"type": "output_text", "text": "A short text."}},
+			}},
+		})
+	}))
+	t.Cleanup(provider.Close)
+
+	agent := httptest.NewUnstartedServer(nil)
+	agent.Start()
+	t.Cleanup(agent.Close)
+	agent.Config.Handler = route.Register(&config.Config{
+		URL: agent.URL, LLMAPIKey: "test-key", LLMBaseURL: provider.URL, LLMModel: "test-model",
+	})
+	return agent.URL
+}
+
+func TestTheAgentAnswersItsCardAndACall(t *testing.T) {
+	url := start(t)
+
+	card, err := agentcard.NewResolver(http.DefaultClient).Resolve(t.Context(), url)
+	require.NoError(t, err)
+	assert.Equal(t, "Summary agent", card.Name)
+	require.Len(t, card.SupportedInterfaces, 1)
+	assert.Equal(t, url+route.InvokePath, card.SupportedInterfaces[0].URL)
+
+	client, err := a2aclient.NewFromCard(t.Context(), card)
+	require.NoError(t, err)
+	result, err := client.SendMessage(t.Context(), &a2a.SendMessageRequest{
+		Message: a2a.NewMessage(a2a.MessageRoleUser, a2a.NewDataPart(map[string]any{"text": "A long text."})),
+	})
+	require.NoError(t, err)
+	message, ok := result.(*a2a.Message)
+	require.True(t, ok, "the answer is a %T, not a message", result)
+	data, ok := message.Parts[0].Data().(map[string]any)
+	require.True(t, ok, "the answer is not a DataPart")
+	assert.Equal(t, "A short text.", data["summary"])
+	assert.Equal(t, "test-model", data["model"])
+	assert.InDelta(t, 15, data["total_tokens"], 0)
+}
