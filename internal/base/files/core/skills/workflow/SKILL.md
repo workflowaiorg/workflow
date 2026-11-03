@@ -370,7 +370,8 @@ a follow-up. A separate cleanup pass does not happen; the git log of every proje
 1. **The domain's `.workflow/specs/<domain>/SPEC.md`** is updated to match what this MR changed,
    citing any record accepted for it at the point of the claim. If the domain has no spec yet,
    writing its first one is an Issue of its own and not yours to start here — say so in the MR
-   description.
+   description. The exception is an Issue that creates the domain: it writes the first spec, as
+   the `domain-specs` skill says.
 2. **Anything the work turned up that would constrain future code** opens an `[ADR]` Issue, by the
    [blocker](#a-discovered-blocker) row above, before this MR merges. Settling never *writes* a
    record: records are accepted in their own Issue, ahead of the code.

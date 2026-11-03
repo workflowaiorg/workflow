@@ -291,6 +291,9 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 					t.Errorf("the %s skill was not installed: %v", skill, err)
 				}
 			}
+			if _, err := os.Stat(filepath.Join(dir, ".claude/commands/backend-design.md")); err != nil {
+				t.Errorf("the backend-design command was not installed: %v", err)
+			}
 			for _, skill := range []string{"database", "queue", "llm-agents"} {
 				if _, err := os.Stat(filepath.Join(dir, ".claude/skills", skill, "SKILL.md")); (err == nil) != every {
 					t.Errorf("with every option %v, the %s skill is installed = %v", every, skill, err == nil)
