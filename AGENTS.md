@@ -50,4 +50,5 @@ of what was done. No AI signatures, no tool output.
 ## Releases
 
 A tag `vX.Y.Z` on `main` runs `.github/workflows/release.yml`: GoReleaser builds the binaries and
-attaches `checksums.txt`. Tags are pushed by the developer, or on their go.
+attaches `checksums.txt` and the GitLab CI template, `ci/gitlab-ci.yml`. Tags are pushed by the
+developer, or on their go.

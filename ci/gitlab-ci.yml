@@ -1,0 +1,71 @@
+# wf's checks for GitLab CI. A project includes this file from the release it is attached to, in its
+# own .gitlab-ci.yml; the README says how. Every job runs in the test stage.
+#
+# The jobs that run wf download the version .wf.yml pins and check it against .wf.sum before
+# running it. A component's jobs run only in a project that has it, and only when a path that can
+# change their result changed. A project changes a job's rules, needs, stage or image by naming
+# the job in its own file. The hidden jobs are named .wf:… so they never merge with a project's own.
+
+.wf:install:
+  image: alpine:3.22
+  # A job with no rules is left out of merge request pipelines.
+  rules:
+    - when: on_success
+  before_script:
+    - |
+      set -e
+      version=$(sed -n 's/^wf:\([^#]*\).*/\1/p' .wf.yml | tr -d "\"' \t\r")
+      case $(uname -m) in
+        x86_64) arch=amd64 ;;
+        aarch64 | arm64) arch=arm64 ;;
+        *) echo "wf has no release for $(uname -m)"; exit 1 ;;
+      esac
+      archive="wf_${version}_linux_${arch}.tar.gz"
+      sum=$(awk -v archive="$archive" '$1 == archive { sub(/^sha256:/, "", $2); print $2 }' .wf.sum)
+      if [ -z "$sum" ]; then echo ".wf.sum has no $archive: run wf lock and commit .wf.sum"; exit 1; fi
+      wget -qO "/tmp/$archive" "https://github.com/workflowaiorg/workflow/releases/download/v$version/$archive"
+      echo "$sum  /tmp/$archive" | sha256sum -c -
+      tar -xzf "/tmp/$archive" -C /usr/local/bin wf
+
+# The files wf writes match .agents and .wf.yml.
+wf:sync:
+  extends: .wf:install
+  script:
+    - wf sync --check
+
+# The specs, the decision records and their index agree.
+wf:spec-coverage:
+  extends: .wf:install
+  script:
+    - wf spec-coverage
+
+# The backend component: the steps of its gate.
+.wf:backend:
+  image: golang:1.25
+  variables:
+    # The golang images never fetch the newer Go a go.mod may ask for; this lets them.
+    GOTOOLCHAIN: auto
+
+backend:go-format:
+  extends: .wf:backend
+  rules:
+    - exists: [go.mod]
+      changes: ["**/*.go"]
+  script:
+    - test -z "$(gofmt -l .)"
+
+backend:go-vet:
+  extends: .wf:backend
+  rules:
+    - exists: [go.mod]
+      changes: ["**/*.go", go.mod, go.sum]
+  script:
+    - go vet ./...
+
+backend:go-test:
+  extends: .wf:backend
+  rules:
+    - exists: [go.mod]
+      changes: ["**/*.go", go.mod, go.sum]
+  script:
+    - go test ./...
