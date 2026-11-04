@@ -26,6 +26,7 @@ What a project gets from it:
 - [A day with wf](#a-day-with-wf)
 - [Your rules and wf's rules](#your-rules-and-wfs-rules)
 - [Get a machine ready](#get-a-machine-ready)
+- [Check every change in CI](#check-every-change-in-ci)
 - [Components](#components)
 - [Settings: .wf.yml](#settings-wfyml)
 - [Commands](#commands)
@@ -106,8 +107,8 @@ Then:
    someone downloads it. `wf init` doesn't do this itself, because it needs the internet.
 4. Commit everything `wf init` and `wf lock` wrote. The assistants read these files from the repository.
 5. Add `/.claude/worktrees` to `.gitignore`. That is where `wf worktree` puts worktrees.
-6. Optional: run `wf sync --check` and `wf spec-coverage` in CI, so the checks bind everyone and
-   not only the people who run them.
+6. Add wf's checks to CI, so they bind everyone and not only the people who run them: see
+   [Check every change in CI](#check-every-change-in-ci).
 
 `wf init` refuses to run in a project that already has a `.wf.yml`.
 
@@ -241,6 +242,55 @@ Run it again at any time: what already passes is left alone.
 wf does not start, stop or check the running app. That is the assistant's work, and the skills say
 how: with the backend, the `architecture` skill has the `docker compose` commands and the health
 check.
+
+## Check every change in CI
+
+Each wf release comes with a GitLab CI template, `gitlab-ci.yml`, that runs wf's checks on every
+pipeline. To use it, include it in your project's `.gitlab-ci.yml`, pinned to one release and to
+that file's fingerprint (GitLab 17.9 or later):
+
+```yaml
+include:
+  - remote: https://github.com/workflowaiorg/workflow/releases/download/v0.1.0/gitlab-ci.yml
+    integrity: sha256-<fingerprint>
+```
+
+Get the fingerprint, then commit:
+
+```sh
+curl -fsSL https://github.com/workflowaiorg/workflow/releases/download/v0.1.0/gitlab-ci.yml \
+  | openssl dgst -sha256 -binary | openssl base64 -A
+```
+
+GitLab refuses to run a template whose fingerprint has changed, so nobody can change your
+pipeline by changing the file behind the URL.
+
+Its jobs, all in the `test` stage:
+
+| Job | Runs | When |
+|---|---|---|
+| `wf:sync` | `wf sync --check` | every pipeline |
+| `wf:spec-coverage` | `wf spec-coverage` | every pipeline |
+| `backend:go-format` | `test -z "$(gofmt -l .)"` | the project has `go.mod`, and a `.go` file changed |
+| `backend:go-vet` | `go vet ./...` | the project has `go.mod`, and a `.go` file, `go.mod` or `go.sum` changed |
+| `backend:go-test` | `go test ./...` | the same |
+
+The `wf:` jobs download the wf that `.wf.yml` pins, and check it against `.wf.sum` before running
+it, so commit `.wf.sum` (see [`wf lock`](#wf-lock)). The `backend:` jobs run in `golang:1.25`; with
+a newer `go` line in `go.mod`, Go downloads that version itself.
+
+The template reads the pin from `.wf.yml`, so `wf update --to` needs no change here. Move the
+include to a newer release, with its new fingerprint, when you want the jobs that release brings.
+
+To change a job, name it in your own `.gitlab-ci.yml`. What you write there wins:
+
+```yaml
+backend:go-test:
+  image: golang:1.26
+  needs: []
+```
+
+If your `.gitlab-ci.yml` lists its `stages:`, include `test` among them.
 
 ## Components
 
@@ -519,7 +569,8 @@ Writes nothing. It fails, and names each file, when:
   extra;
 - `.wf.yml` pins a different wf version from the one running. Run the version it pins.
 
-This is the check to run in CI.
+This is the check to run in CI, and wf's CI template runs it: see
+[Check every change in CI](#check-every-change-in-ci).
 
 ### `wf show <skill> [--base]`
 

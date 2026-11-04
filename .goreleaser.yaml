@@ -1,5 +1,5 @@
 # Builds a release when a vX.Y.Z tag is pushed: binaries for macOS and Linux on amd64 and arm64,
-# and a checksums.txt every download can be verified against.
+# a checksums.txt every download can be verified against, and the GitLab CI template.
 version: 2
 
 project_name: wf
@@ -27,5 +27,8 @@ changelog:
   use: github
 
 # A tag with a suffix (v0.1.0-rc.1) is published as a pre-release, never as the latest release.
+# The GitLab CI template is attached beside the binaries, for a project to include by its URL.
 release:
   prerelease: auto
+  extra_files:
+    - glob: ./ci/gitlab-ci.yml
