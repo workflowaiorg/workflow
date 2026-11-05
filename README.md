@@ -245,9 +245,25 @@ check.
 
 ## Check every change in CI
 
-Each wf release comes with a GitLab CI template, `gitlab-ci.yml`, that runs wf's checks on every
-pipeline. To use it, include it in your project's `.gitlab-ci.yml`, pinned to one release and to
-that file's fingerprint (GitLab 17.9 or later):
+wf comes with CI templates for GitLab and for GitHub Actions. Both run the same checks:
+
+| Check | Runs | When |
+|---|---|---|
+| wf sync | `wf sync --check` | every pipeline |
+| wf spec-coverage | `wf spec-coverage` | every pipeline |
+| backend go-format | `test -z "$(gofmt -l .)"` | the project has `go.mod`, and a `.go` file changed |
+| backend go-vet | `go vet ./...` | the project has `go.mod`, and a `.go` file, `go.mod` or `go.sum` changed |
+| backend go-test | `go test ./...` | the same |
+
+The wf checks download the wf that `.wf.yml` pins, and check it against `.wf.sum` before running
+it, so commit `.wf.sum` (see [`wf lock`](#wf-lock)). The templates read the pin from `.wf.yml`, so
+`wf update --to` needs no change to your CI. Move the template to a newer wf when you want the
+checks that version brings.
+
+### On GitLab
+
+Each wf release comes with the GitLab template, `gitlab-ci.yml`. Include it in your project's
+`.gitlab-ci.yml`, pinned to one release and to that file's fingerprint (GitLab 17.9 or later):
 
 ```yaml
 include:
@@ -265,22 +281,9 @@ curl -fsSL https://github.com/workflowaiorg/workflow/releases/download/v0.1.0/gi
 GitLab refuses to run a template whose fingerprint has changed, so nobody can change your
 pipeline by changing the file behind the URL.
 
-Its jobs, all in the `test` stage:
-
-| Job | Runs | When |
-|---|---|---|
-| `wf:sync` | `wf sync --check` | every pipeline |
-| `wf:spec-coverage` | `wf spec-coverage` | every pipeline |
-| `backend:go-format` | `test -z "$(gofmt -l .)"` | the project has `go.mod`, and a `.go` file changed |
-| `backend:go-vet` | `go vet ./...` | the project has `go.mod`, and a `.go` file, `go.mod` or `go.sum` changed |
-| `backend:go-test` | `go test ./...` | the same |
-
-The `wf:` jobs download the wf that `.wf.yml` pins, and check it against `.wf.sum` before running
-it, so commit `.wf.sum` (see [`wf lock`](#wf-lock)). The `backend:` jobs run in `golang:1.25`; with
-a newer `go` line in `go.mod`, Go downloads that version itself.
-
-The template reads the pin from `.wf.yml`, so `wf update --to` needs no change here. Move the
-include to a newer release, with its new fingerprint, when you want the jobs that release brings.
+The jobs are `wf:sync`, `wf:spec-coverage`, `backend:go-format`, `backend:go-vet` and
+`backend:go-test`, all in the `test` stage. The `backend:` jobs run in `golang:1.25`; with a newer
+`go` line in `go.mod`, Go downloads that version itself.
 
 To change a job, name it in your own `.gitlab-ci.yml`. What you write there wins:
 
@@ -291,6 +294,37 @@ backend:go-test:
 ```
 
 If your `.gitlab-ci.yml` lists its `stages:`, include `test` among them.
+
+### On GitHub
+
+Call wf's workflow from one of your own, such as `.github/workflows/ci.yml`, pinned to the commit
+of a wf release:
+
+```yaml
+name: ci
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  wf:
+    uses: workflowaiorg/workflow/.github/workflows/wf.yml@<commit> # v0.1.0
+```
+
+Find that release's commit:
+
+```sh
+gh api repos/workflowaiorg/workflow/commits/v0.1.0 --jq .sha
+```
+
+A commit can't be moved the way a tag can, so nobody can change wf's workflow behind your back.
+Keep the `# v0.1.0` comment: Renovate reads it, and moves the commit and the comment together to a
+newer release.
+
+The jobs are `wf`, with the two wf checks as steps, and `backend-go-format`, `backend-go-vet` and
+`backend-go-test`, which use the Go version `go.mod` names. A pull request compares against its
+base, a push against the commit before it; a new branch, or any other event, runs every job. A called workflow's jobs
+can't be changed from your side: to change one, copy `wf.yml` into your repository.
 
 ## Components
 
