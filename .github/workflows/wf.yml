@@ -1,0 +1,116 @@
+# wf's checks for GitHub Actions, as a reusable workflow. A project calls it from a workflow of its
+# own, pinned to a commit of this repo; the README says how.
+#
+# The wf job downloads the version .wf.yml pins and checks it against .wf.sum before running it. A
+# component's jobs run only in a project that has it, and only when a path that can change their
+# result changed; with nothing to compare against, they run.
+name: wf
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  wf:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: install the wf .wf.yml pins
+        id: install
+        run: |
+          version=$(sed -n 's/^wf:\([^#]*\).*/\1/p' .wf.yml | tr -d "\"' \t\r")
+          case $(uname -m) in
+            x86_64) arch=amd64 ;;
+            aarch64 | arm64) arch=arm64 ;;
+            *) echo "wf has no release for $(uname -m)"; exit 1 ;;
+          esac
+          archive="wf_${version}_linux_${arch}.tar.gz"
+          sum=$(awk -v archive="$archive" '$1 == archive { sub(/^sha256:/, "", $2); print $2 }' .wf.sum)
+          if [ -z "$sum" ]; then echo ".wf.sum has no $archive: run wf lock and commit .wf.sum"; exit 1; fi
+          curl -fsSLo "$RUNNER_TEMP/$archive" "https://github.com/workflowaiorg/workflow/releases/download/v$version/$archive"
+          echo "$sum  $RUNNER_TEMP/$archive" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/wf"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/wf" wf
+          echo "$RUNNER_TEMP/wf" >> "$GITHUB_PATH"
+      # The files wf writes match .agents and .wf.yml.
+      - name: wf sync --check
+        run: wf sync --check
+      # The specs, the decision records and their index agree. Runs even when wf sync --check failed.
+      - name: wf spec-coverage
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: wf spec-coverage
+
+  # Says, for each component's job, whether the project has the component and a path it checks
+  # changed.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      backend-go-format: ${{ steps.changes.outputs.backend-go-format }}
+      backend-go-vet: ${{ steps.changes.outputs.backend-go-vet }}
+      backend-go-test: ${{ steps.changes.outputs.backend-go-test }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: changes
+        env:
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE_PUSH: ${{ github.event.before }}
+        run: |
+          case "$GITHUB_EVENT_NAME" in
+            pull_request) base=$PULL_REQUEST_BASE ;;
+            push) base=$BEFORE_PUSH ;;
+            *) base= ;;
+          esac
+          # A new branch, or a push that rewrote history, has nothing to compare against.
+          if [ -n "$base" ] && ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=; fi
+          # changed <file only a project with the component has> <path>…
+          changed() {
+            if [ ! -e "$1" ]; then echo false; return; fi
+            shift
+            if [ -z "$base" ]; then echo true; return; fi
+            paths=()
+            for path in "$@"; do paths+=(":(glob)$path"); done
+            if git diff --quiet "$base" HEAD -- "${paths[@]}"; then echo false; else echo true; fi
+          }
+          {
+            echo "backend-go-format=$(changed go.mod '**/*.go')"
+            echo "backend-go-vet=$(changed go.mod '**/*.go' 'go.mod' 'go.sum')"
+            echo "backend-go-test=$(changed go.mod '**/*.go' 'go.mod' 'go.sum')"
+          } >> "$GITHUB_OUTPUT"
+
+  # The backend component: the steps of its gate, with the Go go.mod names.
+  backend-go-format:
+    needs: changes
+    if: needs.changes.outputs.backend-go-format == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: test -z "$(gofmt -l .)"
+
+  backend-go-vet:
+    needs: changes
+    if: needs.changes.outputs.backend-go-vet == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go vet ./...
+
+  backend-go-test:
+    needs: changes
+    if: needs.changes.outputs.backend-go-test == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - run: go test ./...

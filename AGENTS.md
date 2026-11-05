@@ -52,3 +52,6 @@ of what was done. No AI signatures, no tool output.
 A tag `vX.Y.Z` on `main` runs `.github/workflows/release.yml`: GoReleaser builds the binaries and
 attaches `checksums.txt` and the GitLab CI template, `ci/gitlab-ci.yml`. Tags are pushed by the
 developer, or on their go.
+
+`.github/workflows/wf.yml` is not this repo's CI: it is the workflow projects call, the GitHub twin
+of `ci/gitlab-ci.yml`. `ci/ci_test.go` keeps both in step with the components' gate steps.
