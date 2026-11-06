@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/workflowaiorg/workflow/internal/cli"
+	"github.com/workflowaiorg/workflow/internal/project"
 )
 
 func run(t *testing.T, args ...string) (code int, stdout, stderr string) {
@@ -210,18 +211,22 @@ func TestShow(t *testing.T) {
 }
 
 func TestInitThenCheckPasses(t *testing.T) {
-	dir := t.TempDir()
-	if code, stdout, stderr := runIn(t, dir, "init", "--forge=gitlab"); code != 0 || !strings.Contains(stdout, "wrote    .claude/skills/workflow/SKILL.md") || !strings.HasSuffix(stdout, "Next: run wf lock to record wf 0.1.0's fingerprints in .wf.sum, then commit everything.\n") {
-		t.Fatalf("wf init --forge=gitlab = (%d, %q, %q), want exit 0, the skills written and wf lock named as the next step", code, stdout, stderr)
-	}
-	if code, _, stderr := runIn(t, dir, "sync", "--check"); code != 0 {
-		t.Fatalf("wf sync --check right after wf init exited %d: %s", code, stderr)
-	}
-	if code, _, stderr := runIn(t, dir, "spec-coverage"); code != 0 {
-		t.Errorf("wf spec-coverage right after wf init exited %d: %s", code, stderr)
-	}
-	if code, _, stderr := runIn(t, dir, "init", "--forge=gitlab"); code != 2 || !strings.Contains(stderr, ".wf.yml") {
-		t.Errorf("a second wf init = (%d, %q), want exit 2 naming .wf.yml", code, stderr)
+	for _, forge := range project.Forges {
+		t.Run(forge, func(t *testing.T) {
+			dir := t.TempDir()
+			if code, stdout, stderr := runIn(t, dir, "init", "--forge="+forge); code != 0 || !strings.Contains(stdout, "wrote    .claude/skills/forge-"+forge+"/SKILL.md") || !strings.HasSuffix(stdout, "Next: run wf lock to record wf 0.1.0's fingerprints in .wf.sum, then commit everything.\n") {
+				t.Fatalf("wf init --forge=%s = (%d, %q, %q), want exit 0, the forge's skill written and wf lock named as the next step", forge, code, stdout, stderr)
+			}
+			if code, _, stderr := runIn(t, dir, "sync", "--check"); code != 0 {
+				t.Fatalf("wf sync --check right after wf init exited %d: %s", code, stderr)
+			}
+			if code, _, stderr := runIn(t, dir, "spec-coverage"); code != 0 {
+				t.Errorf("wf spec-coverage right after wf init exited %d: %s", code, stderr)
+			}
+			if code, _, stderr := runIn(t, dir, "init", "--forge="+forge); code != 2 || !strings.Contains(stderr, ".wf.yml") {
+				t.Errorf("a second wf init = (%d, %q), want exit 2 naming .wf.yml", code, stderr)
+			}
+		})
 	}
 }
 
@@ -328,7 +333,7 @@ func TestABadSettingIsNamedBeforeAnythingIsWritten(t *testing.T) {
 	}{
 		{name: "no version pin", from: "wf: ", to: "# wf: ", want: "pins no wf version"},
 		{name: "no forge", from: "forge: gitlab\n", to: "", want: "add forge: gitlab"},
-		{name: "an unknown forge", from: "forge: gitlab", to: "forge: github", want: "forge: github is not one wf has a base for"},
+		{name: "an unknown forge", from: "forge: gitlab", to: "forge: sourcehut", want: "forge: sourcehut is not one wf has a base for"},
 		{name: "a gate step with no paths", from: "# gate:", to: "gate:\n  - name: lint\n    run: make lint\n#", want: "gate[0] (lint) needs paths:"},
 		{name: "a gate step whose paths is one string", from: "# gate:", to: "gate:\n  - name: lint\n    paths: \"*.go\"\n    run: make lint\n#", want: "gate[0] (lint) needs paths:"},
 		{name: "a gate step with no name or run", from: "# gate:", to: "gate:\n  - paths: [\"*.go\"]\n#", want: "gate[0] needs name: the step's name, run: the command"},

@@ -11,6 +11,7 @@ import (
 
 	"github.com/workflowaiorg/workflow/internal/base"
 	"github.com/workflowaiorg/workflow/internal/component"
+	"github.com/workflowaiorg/workflow/internal/component/backend"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -20,21 +21,34 @@ func TestFilesRefusesAForgeItHasNoBaseFor(t *testing.T) {
 	}
 }
 
-func TestTheWorkflowSkillNamesNoForgeCommand(t *testing.T) {
-	files, err := base.Files("gitlab", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Everything forge-specific lives in the forge's own skill, so the workflow holds on any forge.
-	for _, name := range []string{"skills/workflow/SKILL.md", "skills/domain-specs/SKILL.md", "workflow/GUIDE.md"} {
-		for _, word := range []*regexp.Regexp{regexp.MustCompile(`\bglab\b`), regexp.MustCompile(`\bgh\b`), regexp.MustCompile(`\w::\w`)} {
-			if found := word.FindString(string(files[name])); found != "" {
-				t.Errorf("%s names %q, which belongs to a forge skill", name, found)
-			}
+func TestOnlyTheForgeSkillNamesTheForge(t *testing.T) {
+	// Everything forge-specific lives in the forge's own skill, so the rest holds on any forge.
+	forgeWords := regexp.MustCompile(`\bglab\b|\bgh\b|\w::\w|(?i:merge requests?|pull requests?)\b|\bPRs?\b|\bGit(Lab|Hub)\b`)
+	cli := map[string]string{"gitlab": "glab", "github": "gh"}
+	// The backend with every option on, so that none of its parts goes unread.
+	all := map[string]any{}
+	for _, option := range backend.Component.Options {
+		if option.Bool {
+			all[option.Name] = true
 		}
 	}
-	if !strings.Contains(string(files["skills/forge-gitlab/SKILL.md"]), "glab") {
-		t.Error("the forge-gitlab skill never names glab")
+	for _, forge := range project.Forges {
+		files, err := base.Files(forge, []component.Component{backend.Component.With(all)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		skill := "skills/forge-" + forge + "/SKILL.md"
+		if !regexp.MustCompile(`\b` + cli[forge] + ` `).Match(files[skill]) {
+			t.Errorf("the forge-%s skill never runs %s", forge, cli[forge])
+		}
+		for name, content := range files {
+			if name == skill {
+				continue
+			}
+			if found := forgeWords.FindString(string(content)); found != "" {
+				t.Errorf("on %s, %s names %q, which belongs to the forge skill", forge, name, found)
+			}
+		}
 	}
 }
 
