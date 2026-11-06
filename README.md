@@ -15,9 +15,8 @@ What a project gets from it:
   takes a clean clone to a ready repo. wf does not start or stop the app: the skills tell the
   assistant how.
 
-> wf is young. It works with GitLab only so far, and it can't update a project to a newer wf yet.
-> The milestone [v0.1.0](https://github.com/workflowaiorg/workflow/milestone/1) lists what comes
-> next.
+> wf is young. It works with GitLab and GitHub. The milestone
+> [v0.1.0](https://github.com/workflowaiorg/workflow/milestone/1) lists what comes next.
 
 ## Contents
 
@@ -81,11 +80,20 @@ what it changes.
 Run this at the root of the repository:
 
 ```sh
-wf init --forge=gitlab
+wf init --forge=gitlab    # or --forge=github
 ```
 
-The forge is where the project's Issues and merge requests live. If you leave out `--forge`, wf
-asks for it.
+The forge is where the project's Issues and merge or pull requests live: `gitlab` or `github`. If
+you leave out `--forge`, wf asks for it. It decides which forge skill wf installs: `forge-gitlab`
+teaches the assistant `glab`, merge requests and GitLab's scoped labels, `forge-github` teaches it
+`gh`, pull requests and plain labels. The rest of the workflow is the same on both, and calls the
+merge or pull request an MR.
+
+Create the labels the `workflow` skill uses once, by hand: a status (`todo`, `in progress`,
+`in review`, `blocked`), a type (`feature`, `bug`, `chore`, `docs`, `decision`) and one area for
+each part of the project. On GitLab they are scoped labels, such as `status::todo`; on GitHub,
+plain ones, such as `status: todo`. Both forges run the same checks on
+every change: see [Check every change in CI](#check-every-change-in-ci).
 
 `wf init` writes:
 
@@ -148,7 +156,7 @@ like.
 3. **The assistant works and tells you what it did.** Nothing is committed yet.
 4. **You run `/pre-mr-check`** (or the assistant offers it). It runs the checks the changed files
    call for. Then a reviewer subagent reads the change with fresh eyes. You get a table and a verdict.
-5. **You say go.** Only then does the assistant commit, push and open the merge request.
+5. **You say go.** Only then does the assistant commit, push and open the MR.
 6. **Merge.** The Issue closes.
 
 Bigger work starts with a plan. The assistant writes it in `wf worktree plan <slug>`. Then
@@ -174,6 +182,8 @@ at the end, under a heading `## This project`.
 ```markdown
 Area labels: `area::api`, `area::web`.
 ```
+
+On GitHub, the labels are `area: api` and `area: web`.
 
 Then run:
 
@@ -701,7 +711,7 @@ What wf installs:
 | Kind | Name | What it is for |
 |---|---|---|
 | skill | `workflow` | how every change goes: Issue, worktree, check, go, merge |
-| skill | `forge-gitlab` | the GitLab commands and labels the `workflow` skill uses |
+| skill | `forge-gitlab` or `forge-github` | the forge's commands and labels the `workflow` skill uses |
 | skill | `domain-specs` | how to write specs and decision records |
 | command | `/plan-check` | a reviewer subagent reads a plan before any work starts |
 | command | `/pre-mr-check` | runs the gate, then a reviewer subagent reads the change |
@@ -728,7 +738,7 @@ What wf installs:
 | `kept … (no longer generated, but edited by hand)` | wf no longer writes this file, and someone edited it. Delete it yourself if you don't need it |
 | `a template takes no project part` | Move that text into `.agents/project/skills/domain-specs/SKILL.md` and delete the file |
 | `.wf.yml: pins no wf version` | Add `wf:` with the version `wf version` prints, such as `wf: 0.1.0` |
-| `.wf.yml: names no forge`, `forge: … is not one wf has a base for` | Set `forge:` to a forge wf knows: `gitlab` |
+| `.wf.yml: names no forge`, `forge: … is not one wf has a base for` | Set `forge:` to a forge wf knows: `gitlab` or `github` |
 | `.wf.yml: gate[0] (lint) needs …` | Give that step what it names: `name:`, `paths:` as a list, `run:` |
 | `.wf.yml: doctor[0] (…) needs …`, `has a … that …` | Give that check `name:` and `run:`; `fix:` is a command; a check has no other keys |
 | `has a run: that YAML does not read as text` | Put the command in quotes, such as `run: "false"` |

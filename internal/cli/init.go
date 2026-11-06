@@ -41,7 +41,7 @@ forge: %s
 
 func runInit(app *App, args []string) error {
 	flags := flag.NewFlagSet("init", flag.ContinueOnError)
-	forge := flags.String("forge", "", "the forge the project's Issues and merge requests live on: "+strings.Join(project.Forges, ", "))
+	forge := flags.String("forge", "", "the forge the project's Issues and MRs live on: "+strings.Join(project.Forges, ", "))
 	if err := app.parseFlags(flags, args); err != nil {
 		return err
 	}

@@ -39,12 +39,12 @@ func TestLoadReadsTheSettings(t *testing.T) {
 }
 
 func TestLoadNamesEveryMistakeAtOnce(t *testing.T) {
-	_, err := load(t, "forge: github\ngate:\n  - name: lint\nworktree:\n  skip: [\"[\"]\n")
+	_, err := load(t, "forge: sourcehut\ngate:\n  - name: lint\nworktree:\n  skip: [\"[\"]\n")
 	var mistake *project.UserError
 	if !errors.As(err, &mistake) {
 		t.Fatalf("Load = %v, want a UserError", err)
 	}
-	for _, want := range []string{"pins no wf version", "forge: github", "gate[0] (lint) needs paths:", `worktree.skip has a bad pattern "["`} {
+	for _, want := range []string{"pins no wf version", "forge: sourcehut", "gate[0] (lint) needs paths:", `worktree.skip has a bad pattern "["`} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load = %q, want it to say %q", err, want)
 		}

@@ -16,7 +16,7 @@ Activate the matching skill **before** working in its area — don't wait until 
 - `workflow` — before editing project files on any request that is not read-only, before
   committing or pushing anything, and when asked to merge.
 - `forge-[[ .forge ]]` — with `workflow`, whenever it sends you to the forge: Issues, labels,
-  milestones, merge requests.
+  milestones, MRs.
 - `domain-specs` — when writing or editing a `.workflow/specs/<domain>/SPEC.md`, when deciding
   whether a choice earns a decision record, when writing or superseding one, or when settling an
   Issue.

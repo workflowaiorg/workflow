@@ -27,7 +27,7 @@ which idiom to write it in.
    around it uses the older pattern.
 3. **Never use a rule above it.** It does not compile, or the API does not exist yet.
 4. **Skip a rule only** when it would change behaviour or plainly does not fit, and say why in the
-   merge request.
+   MR.
 
 Rewriting existing code only to modernise it is a change of its own, never a side effect of
 another one.
@@ -101,4 +101,4 @@ In the change that raises the `go` line in `go.mod`:
 
 - [ ] New and changed Go code uses every rule at or below the `go.mod` version that fits it
 - [ ] No rule above the `go.mod` version is used
-- [ ] A rule that fits but was skipped is explained in the merge request
+- [ ] A rule that fits but was skipped is explained in the MR

@@ -28,7 +28,7 @@ const (
 )
 
 // Forges are the forges wf has a base for.
-var Forges = []string{"gitlab"}
+var Forges = []string{"gitlab", "github"}
 
 // UserError is the developer's mistake rather than wf's fault: a setting that is wrong, or
 // something they named that is not there. wf exits 2 on one.

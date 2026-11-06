@@ -5,14 +5,14 @@ description: "Runs every implementation task through an Issue — intake before 
 
 # Skill: The workflow
 
-The forge — GitLab, GitHub — holds who is doing what, how far it got and whether it was accepted.
+The forge holds who is doing what, how far it got and whether it was accepted.
 The repository holds the implementation, the specs and the engineering rules. This skill is the
 seam between the two, and it holds on any forge. How each step is done on this project's forge —
 the CLI, the label syntax, the traps — is the `forge-[[ .forge ]]` skill; activate it with this one.
 *How* to build the thing lives in `.workflow/GUIDE.md` and the skills of each area; this file does
 not restate it.
 
-An MR here is the forge's unit of review: a merge request on GitLab, a pull request on GitHub.
+An MR here is the forge's unit of review; the `forge-[[ .forge ]]` skill says what it is called there.
 
 ---
 

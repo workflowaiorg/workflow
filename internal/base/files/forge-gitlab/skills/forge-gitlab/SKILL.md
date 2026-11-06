@@ -5,9 +5,9 @@ description: "How each step of the workflow skill is done on GitLab with glab �
 
 # Skill: The workflow on GitLab
 
-The `workflow` skill says what happens and when; this one says how on GitLab. Use `glab` directly —
-wf wraps none of it. Where `glab` has a flag for something, use it; `glab api` is for the few things
-it does not cover, named below.
+The `workflow` skill says what happens and when; this one says how on GitLab. Its MR is a merge
+request here. Use `glab` directly — wf wraps none of it. Where `glab` has a flag for something, use
+it; `glab api` is for the few things it does not cover, named below.
 
 ---
 
