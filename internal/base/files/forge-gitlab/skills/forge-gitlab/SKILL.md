@@ -60,8 +60,10 @@ moves to "Closed" on its own, keeping the status it had.
 - **Take it out of Draft** when the Issue's work is done: `glab mr update <n> --ready`, together
   with the status swap above.
 - **Read a review:** `glab mr view <n> --comments`; the diff with `glab mr diff <n>`.
-- **Merge** only when asked: `glab mr merge <n> --squash` when the developer said squash, plain
-  `glab mr merge <n>` otherwise. `glab mr merge` sets auto-merge by default, which waits for the
+- **Merge** only when asked. Squashed, with the message the workflow skill shapes:
+  `glab mr merge <n> --squash --squash-message "$(cat message.md)"`, where `message.md` holds the
+  whole message, summary line first; without `--squash-message`, GitLab writes its own. Unsquashed,
+  plain `glab mr merge <n>`. `glab mr merge` sets auto-merge by default, which waits for the
   pipeline — **but only when a pipeline exists.** With none running (CI minutes used up, say), it
   merges at once. So check the pipeline first — `glab mr view <n>` shows it — and say so to the
   developer when there is none.

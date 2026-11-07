@@ -281,8 +281,8 @@ worktree — and reaches `main` before any of its Issues start, where every one 
 | The developer says | What you do |
 |---|---|
 | No | Report what changed. Commit nothing, push nothing. They will read it themselves, or say what to change |
-| Yes → `NOT READY` | Report the gate failures and the 🔴 findings. Commit nothing, push nothing. They decide what gets fixed now |
-| Yes → `READY FOR REVIEW` | Report the verdict and the 🟡/🟢 findings, and **propose** the commit message, the MR description and the label. Then wait |
+| Yes → `NOT READY` | Report what `/pre-mr-check` reported: the gate failures and the kept 🔴 findings. Commit nothing, push nothing. They decide what gets fixed now |
+| Yes → `READY FOR REVIEW` | Report what `/pre-mr-check` reported: the verdict, the kept 🟡/🟢 findings and the dropped ones, and **propose** the commit message, the MR description and the label. Then wait |
 | Go | If an acceptance check of the Issue is still open — a measurement only a person can run, say — the reply opens with one plain line, "#n is not finished: <what is left>", and waits; an approval given after that line covers the open check, and the MR description names it. Never fold it into a 🟡, a trailing note or a `[pending]` line in the MR description. Otherwise: commit, push, open or update the MR; and when the Issue's work is done, move its status from `in progress` to `in review` and take the MR out of Draft |
 
 Nothing reaches the remote or the forge before that go — no commit, no branch, no MR, no
@@ -437,7 +437,7 @@ A hotfix is a commit pushed directly to the target branch. It skips intake, bran
 - [ ] The developer read the work before anything was committed or pushed, and where it came from a
       plan, they had accepted that plan before the Issue existed
 - [ ] `/pre-mr-check` was offered before each push; where it ran, the gate was green or ⚪ and every
-      🔴 finding has a fixing commit or a written objection; where it was declined, or not offered
+      kept 🔴 finding has a fixing commit or a written objection; where it was declined, or not offered
       because there was nothing to check, the description says so
 - [ ] The Issue's milestone was settled before `in progress` — its stage's, or none for a one-off —
       and every sub-Issue or blocker Issue it spawned took the same test

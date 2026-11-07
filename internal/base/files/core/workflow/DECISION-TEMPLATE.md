@@ -18,8 +18,7 @@ Do not write this file until the ADR Issue has been accepted in its thread. The 
 proposed state — see the domain-specs skill, "How a record is accepted". There is no `proposed`
 status here, and `accepted` is not yours to assign on your own judgement.
 
-Records are never edited afterwards. A decision that changes gets a new record, a new Issue, and
-`supersedes:` naming the old one, which gets `superseded_by:` filled in. Delete these comments
+How a record may change afterwards is in the domain-specs skill, *Superseding*. Delete these comments
 and the generated line above them.
 -->
 

@@ -34,14 +34,18 @@ Run `wf sync` after editing `.agents/project/`.
 
 - A code comment states its reason itself and never cites an Issue — the reader should not have to
   leave the code to understand it. Issue links belong in the MR description.
+- **A comment is written only when it is needed**: for what the code cannot say — a reason, a
+  constraint, a trap. None for a name, a signature or a body that already says it, and none that
+  repeats a comment or a doc elsewhere. The same goes for docs and skills: a rule lives in one
+  place, and everywhere else links to it or says nothing.
 - Do not create documentation files unless explicitly requested.
 - **Every plan lives at `.workflow/plans/<DD-MM-YYYY>-<short-slug>/PLAN.md`** — the date the plan
   was started, then a two-to-four-word kebab-case slug naming the work. One directory per plan;
   anything else the plan needs sits beside its `PLAN.md`, never loose in `.workflow/plans/`.
 - **A plan is not the record of state.** Two files outlive it: `.workflow/specs/<domain>/SPEC.md`
   says what is true now and is edited in place; `.workflow/decisions/NNNN-<slug>.md` says why, and
-  is never edited. A record is accepted in its own `[ADR]` Issue **before** the code that relies
-  on it — most decisions never earn one. See the `domain-specs` skill.
+  is edited only as the `domain-specs` skill allows. A record is accepted in its own `[ADR]` Issue
+  **before** the code that relies on it — most decisions never earn one.
 - **Every Issue settles in the MR that does the work** — the domain's `SPEC.md` is updated to match
   what changed, and a plan whose last Issue this was moves to `.workflow/plans/archive/`. An Issue
   with no behaviour change settles in one line in the MR description. See the `workflow` skill.
