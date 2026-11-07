@@ -10,7 +10,7 @@ Its neighbours, and what each one is for:
 |---|---|
 | `AGENTS.md` | the rules every assistant and contributor reads first |
 | `.workflow/specs/<domain>/SPEC.md` | what is true of a domain **now** — state machines, money rules, retry semantics, what is deliberately not built. Edited in place, keeps no history |
-| `.workflow/decisions/` | why the system is the way it is, and what we turned down. Numbered, never edited, accepted in an `[ADR]` Issue before the code that relies on them. `README.md` there is the index |
+| `.workflow/decisions/` | why the system is the way it is, and what we turned down. Numbered, edited only as the `domain-specs` skill allows, accepted in an `[ADR]` Issue before the code that relies on them. `README.md` there is the index |
 | `.workflow/plans/` | plans in flight, one directory each, `<DD-MM-YYYY>-<slug>/PLAN.md` |
 | `.workflow/plans/archive/` | plans whose last Issue has settled |
 
@@ -30,7 +30,8 @@ this is the shape of them.
    several Issues can be in progress at once without sharing a tree.
 4. **The work, uncommitted.** Nothing is committed or pushed until the developer has read it.
 5. **The check.** `/pre-mr-check` runs the gate steps the changed paths call for, then the
-   `code-reviewer` subagent reads the change in a fresh context. It reports; the developer decides.
+   `code-reviewer` subagent reads the change in a fresh context, and each finding is checked against
+   the code before it is reported. It reports; the developer decides.
 6. **Go.** On the developer's go: commit, push, open the MR as a Draft with `Closes #n`, and take it
    out of Draft when the Issue's work is done.
 7. **Settled in the same MR.** The domain's spec matches what changed, a decision that constrains
@@ -73,7 +74,7 @@ Written by `wf sync` for every assistant from `.agents/`: `.claude/commands/`,
 | Command | What it does |
 |---|---|
 | `/plan-check <plan-dir>` | Hands a plan under `.workflow/plans/` to the `plan-reviewer` subagent, which reads it against the repository as it is now: contradictions, wrong assumptions about the code, work with no acceptance checks, a decision that should be a record. Verdict `READY TO IMPLEMENT` or `NOT READY`. The developer accepts the plan; a clean verdict is evidence, not permission |
-| `/pre-mr-check` | Run when the work is finished and before anything is committed. Works out which gate steps the changed paths call for, runs every one that applies even after a failure, then hands the diff to the `code-reviewer` subagent. Out comes a gate table, severity-ranked findings and a verdict: `READY FOR REVIEW` or `NOT READY`. It changes nothing |
+| `/pre-mr-check` | Run when the work is finished and before anything is committed. Works out which gate steps the changed paths call for, runs every one that applies even after a failure, then hands the diff to the `code-reviewer` subagent and checks each of its findings against the code. Out comes a gate table, the findings it kept, the ones it dropped with the reason, and a verdict: `READY FOR REVIEW` or `NOT READY`. It changes nothing |
 
 ### Where everything lives
 

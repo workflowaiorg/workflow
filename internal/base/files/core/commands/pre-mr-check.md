@@ -70,21 +70,41 @@ Tell it:
 Do not review the change yourself instead. You wrote it — that is precisely why something else reads
 it.
 
-## 3. Report
+## 3. Filter the findings
+
+A reviewer reading cold over-reports: a finding can rest on a misread line, restate what an earlier
+round already fixed, raise something the Issue keeps out of scope or another Issue already tracks,
+or ask for a style preference or for hardening nothing needs. **Check every finding against the
+code before it reaches the developer** — open the line it cites and confirm the defect is there.
+Every round costs a review and a fix, so noise passed on is how one Issue never finishes.
+
+Sort each one into:
+
+- **Keep** — a confirmed defect: a wrong result, a crash, a broken repository rule, or a doc or test
+  that misleads. Its severity stays the reviewer's unless the check showed otherwise; then say why.
+- **Drop** — noise, with one line saying why: not there when checked, already fixed, out of scope,
+  tracked by #n, or a preference. A dropped finding is still listed, so the developer can overrule it.
+
+The filter judges findings, never the verdict: the reviewer's verdict is still reported in its own
+words, even when every finding behind it was dropped.
+
+## 4. Report
 
 1. The gate table, one row per step.
-2. The reviewer's findings, blocking first, each with its `file:line` — and **its own verdict and
-   rationale, in its words**. `Approve`, `Approve with comments` or `Request changes` is its
-   judgement of the change; never drop it, summarise it away, or soften it.
+2. The kept findings, blocking first, each with its `file:line`; then the dropped ones, one line
+   each with the reason — and **the reviewer's own verdict and rationale, in its words**.
+   `Approve`, `Approve with comments` or `Request changes` is its judgement of the change; never
+   drop it, summarise it away, or soften it.
 3. Then your own line, which is arithmetic rather than judgement:
-   - **`READY FOR REVIEW`** — every gate step ✅ or ⚪, and no 🔴 finding.
+   - **`READY FOR REVIEW`** — every gate step ✅ or ⚪, and no kept 🔴 finding.
    - **`NOT READY`** — followed by an ordered checklist of what to fix.
 
 The two answer different questions and can differ in wording without disagreeing: the reviewer says
 what it thinks of the change, this line says whether anything blocks. `Approve with comments` with
-a green gate is `READY FOR REVIEW`; `Request changes` normally carries at least one 🔴, which makes it
-`NOT READY`.
-If the reviewer requests changes while raising nothing blocking, say so plainly — that mismatch is
+a green gate is `READY FOR REVIEW`; `Request changes` normally carries at least one kept 🔴, which
+makes it `NOT READY`.
+If the reviewer requests changes while nothing blocking was kept — none raised, or every one
+dropped by the filter — say so plainly — that mismatch is
 worth the developer's attention, not a silent resolution.
 
 Then stop. Offer the developer the commit message and the MR description you *would* write, and wait

@@ -209,13 +209,23 @@ review. Two branches can both grab `0031`; renumber at merge, it takes half a mi
 
 ### Superseding
 
-A record is **never edited**. A decision that changes gets a new record and a new ADR Issue —
-changing your mind is itself a decision. The new record says `supersedes:` the old number from
-the moment it is written. The single allowed edit to an existing record is marking it replaced —
-`status: superseded` and `superseded_by:` the new number — and at that moment the spec's
-`→ [ADR-NNNN]` must move to the new number. The two records name each other, and so do the index
-rows: the old row's `Superseded by` and the new row's `Supersedes`. A record with no `supersedes:`
-line means `—`.
+A record is **never edited**, except as the two paragraphs after this one allow. A decision that
+changes gets a new record and a new ADR Issue — changing your mind is itself a decision. The new
+record says `supersedes:` the old number from the moment it is written. The one edit allowed to a
+record in force is marking it replaced — `status: superseded` and `superseded_by:` the new number —
+and at that moment the spec's `→ [ADR-NNNN]` must move to the new number. The two records name each
+other, and so do the index rows: the old row's `Superseded by` and the new row's `Supersedes`. A
+record with no `supersedes:` line means `—`.
+
+**A record no merged code relies on yet** may be amended in the MR that first builds it, with the
+reason in the MR description and a comment on the record's `[ADR]` Issue — before anything is built
+on it, a second record would only describe a road nobody took.
+
+**A record whose feature is removed from the code** may be deleted, together with its index row and
+every spec line that cites it, with the reason stated in the commit and the MR. Git history keeps
+it. The records it supersedes, or that supersede it, describe the same removed feature and go with
+it; a record that stays keeps no `supersedes:` or `superseded_by:` naming a deleted one, and its
+index row says `—` there instead.
 
 The new record lands before the code that builds it, so for a while the spec describes behaviour
 whose record is already superseded. The claim keeps describing today, and carries the **Decided,

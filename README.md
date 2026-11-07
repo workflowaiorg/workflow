@@ -155,7 +155,9 @@ like.
    be worked on at once.
 3. **The assistant works and tells you what it did.** Nothing is committed yet.
 4. **You run `/pre-mr-check`** (or the assistant offers it). It runs the checks the changed files
-   call for. Then a reviewer subagent reads the change with fresh eyes. You get a table and a verdict.
+   call for. Then a reviewer subagent reads the change with fresh eyes, and the
+   assistant checks each finding against the code, dropping noise with a one-line reason. You get a
+   table and a verdict.
 5. **You say go.** Only then does the assistant commit, push and open the MR.
 6. **Merge.** The Issue closes.
 
