@@ -1,0 +1,43 @@
+package route_test
+
+import (
+	"os"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/api/internal/app"
+	"[[ .module ]]/api/internal/config"
+	"[[ .module ]]/api/internal/route"
+	"[[ .module ]]/pkg/openapi"
+)
+
+// A route registered without its operation, or an operation left behind by a removed route, fails
+// here. Nothing in this test dials anything.
+func TestRegisterMatchesTheOperations(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	require.NoError(t, route.Register(t.Context(), &app.App{Config: &config.Config{}}, r))
+
+	var registered, described []string
+	for _, registeredRoute := range r.Routes() {
+		registered = append(registered, registeredRoute.Method+" "+registeredRoute.Path)
+	}
+	for _, operation := range route.Operations() {
+		described = append(described, operation.Method+" "+operation.Path)
+	}
+	assert.ElementsMatch(t, registered, described)
+}
+
+func TestTheOpenAPIDocumentIsUpToDate(t *testing.T) {
+	generated, err := openapi.Build(route.Operations())
+	require.NoError(t, err)
+	committed, err := os.ReadFile("../../openapi.yaml")
+	require.NoError(t, err)
+	if string(committed) != string(generated) {
+		t.Fatal("the service's openapi.yaml is not what its Go types generate. From the root, run its\n" +
+			"cmd/openapi, as go run ./<service>/cmd/openapi, and commit the file it writes.")
+	}
+}

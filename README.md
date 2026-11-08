@@ -265,7 +265,17 @@ wf comes with CI templates for GitLab and for GitHub Actions. Both run the same 
 | wf spec-coverage | `wf spec-coverage` | every pipeline |
 | backend go-format | `test -z "$(gofmt -l .)"` | the project has `go.mod`, and a `.go` file changed |
 | backend go-vet | `go vet ./...` | the project has `go.mod`, and a `.go` file, `go.mod` or `go.sum` changed |
-| backend go-test | `go test ./...` | the same |
+| backend go-test | `go test ./...` | the same, or an `openapi.yaml` changed |
+| openapi breaking | `oasdiff breaking`, each `<service>/openapi.yaml` against the target branch's | in a merge request or pull request, the project has `go.mod`, and an `openapi.yaml` changed |
+
+The breaking-change check fails when a change to a service's HTTP contract would break a client:
+a required field or a route removed before its sunset, say. To accept the break on purpose, add the
+`api-passthrough` label to the merge request or pull request. Create the label once:
+
+```sh
+glab label create --name api-passthrough --description "Accepts a break in an openapi.yaml"  # GitLab
+gh label create api-passthrough --description "Accepts a break in an openapi.yaml"          # GitHub
+```
 
 The wf checks download the wf that `.wf.yml` pins, and check it against `.wf.sum` before running
 it, so commit `.wf.sum` (see [`wf lock`](#wf-lock)). The templates read the pin from `.wf.yml`, so
@@ -293,8 +303,10 @@ curl -fsSL https://github.com/workflowaiorg/workflow/releases/download/v0.1.0/gi
 GitLab refuses to run a template whose fingerprint has changed, so nobody can change your
 pipeline by changing the file behind the URL.
 
-The jobs are `wf:sync`, `wf:spec-coverage`, `backend:go-format`, `backend:go-vet` and
-`backend:go-test`, all in the `test` stage. The `backend:` jobs run in `golang:1.25`; with a newer
+The jobs are `wf:sync`, `wf:spec-coverage`, `backend:go-format`, `backend:go-vet`,
+`backend:go-test` and `openapi:breaking`, all in the `test` stage. GitLab reads a merge request's
+labels when its pipeline starts: after adding `api-passthrough`, start a new pipeline for the merge
+request. The `backend:` jobs run in `golang:1.25`; with a newer
 `go` line in `go.mod`, Go downloads that version itself.
 
 To change a job, name it in your own `.gitlab-ci.yml`. What you write there wins:
@@ -316,6 +328,7 @@ of a wf release:
 name: ci
 on:
   pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
 jobs:
@@ -333,10 +346,12 @@ A commit can't be moved the way a tag can, so nobody can change wf's workflow be
 Keep the `# v0.1.0` comment: Renovate reads it, and moves the commit and the comment together to a
 newer release.
 
-The jobs are `wf`, with the two wf checks as steps, and `backend-go-format`, `backend-go-vet` and
-`backend-go-test`, which use the Go version `go.mod` names. A pull request compares against its
-base, a push against the commit before it; a new branch, or any other event, runs every job. A called workflow's jobs
-can't be changed from your side: to change one, copy `wf.yml` into your repository.
+The jobs are `wf`, with the two wf checks as steps, `backend-go-format`, `backend-go-vet` and
+`backend-go-test`, which use the Go version `go.mod` names, and `openapi-breaking`. A pull request
+compares against its base, a push against the commit before it; a new branch, or any other event,
+runs every job but `openapi-breaking`, which judges pull requests only. The `pull_request` types
+above make adding or removing `api-passthrough` start a new run. A called workflow's jobs can't be
+changed from your side: to change one, copy `wf.yml` into your repository.
 
 ## Components
 
@@ -380,13 +395,20 @@ curl http://localhost:8000/health
 | What | Where |
 |---|---|
 | the Go module | `go.mod` |
-| the packages every service shares: logging, errors, HTTP answers, the correlation ID | `pkg/` |
+| the packages every service shares: logging, errors, HTTP requests and answers, the correlation ID, the OpenAPI document | `pkg/` |
 | a first service, `api`, with its settings, `/health` and tests | `api/` |
+| `api`'s HTTP contract, generated from its Go types, and the command that writes it | `api/openapi.yaml`, `api/cmd/openapi/` |
 | the local stack, building each service from its source as it starts | `docker-compose.yaml` |
 
 If one of them exists already, wf leaves it alone. With your own `docker-compose.yaml`, add the
 `api` service to it by hand. In a project that has a `go.mod`, `--module` must be the module it
 names.
+
+**The HTTP contract.** Each public route has an operation in its handler package's `openapi.go`,
+and `go run ./api/cmd/openapi` writes `api/openapi.yaml` from them. Commit the file; never edit it
+by hand. `go test ./...` fails on a route with no operation, on a file the Go types no longer
+generate, and on a handler test whose response the file does not allow. CI fails on a change that
+would break a client, unless it carries `api-passthrough`. The `api-design` skill has the rules.
 
 There is no Dockerfile: locally each service is built from its source as it starts, and an image is
 a deploy's business.
@@ -397,7 +419,7 @@ It also brings:
   `testing` and `go-style`, and a backend section in `AGENTS.md`;
 - the `/backend-design` command, below;
 - three gate steps for `/pre-mr-check` when Go files change: `gofmt`, `go vet ./...` and
-  `go test ./...`;
+  `go test ./...`, which also runs when an `openapi.yaml` changes;
 - two `wf doctor` checks: Go is installed and Docker is running.
 
 wf has no commands for the routine: the agent runs `go test`, `go mod tidy` and the rest itself, as

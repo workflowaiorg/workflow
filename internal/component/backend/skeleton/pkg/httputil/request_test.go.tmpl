@@ -1,0 +1,106 @@
+package httputil_test
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gin-gonic/gin"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/httputil"
+)
+
+// request is the context of a request for target, routed through pattern so it has its params.
+func request(t *testing.T, pattern, target string) *gin.Context {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	var got *gin.Context
+	r := gin.New()
+	r.GET(pattern, func(c *gin.Context) { got = c.Copy() })
+	r.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, target, nil))
+	require.NotNil(t, got, "%s does not match %s", target, pattern)
+	return got
+}
+
+func assertCode(t *testing.T, err error, code errors.Code) {
+	t.Helper()
+	var apiErr *errors.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, code, apiErr.Code)
+}
+
+func TestParsePage(t *testing.T) {
+	tests := []struct {
+		name   string
+		target string
+		want   httputil.Page
+		fails  bool
+	}{
+		{name: "no query is the first full page", target: "/", want: httputil.Page{Offset: 0, Limit: 50}},
+		{name: "an offset and a limit", target: "/?offset=20&limit=10", want: httputil.Page{Offset: 20, Limit: 10}},
+		{name: "the maximum limit", target: "/?limit=50", want: httputil.Page{Limit: 50}},
+		{name: "a limit past the maximum", target: "/?limit=51", fails: true},
+		{name: "a negative offset", target: "/?offset=-1", fails: true},
+		{name: "a zero limit", target: "/?limit=0", want: httputil.Page{Limit: 50}},
+		{name: "a limit that is not a number", target: "/?limit=ten", fails: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			page, err := httputil.ParsePage(request(t, "/", test.target), 50)
+			if test.fails {
+				assertCode(t, err, errors.CodeInvalidRequest)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.want, page)
+		})
+	}
+}
+
+func TestHasMore(t *testing.T) {
+	page := httputil.Page{Offset: 20, Limit: 10}
+	assert.True(t, page.HasMore(10, 31))
+	assert.False(t, page.HasMore(10, 30))
+}
+
+func TestParamID(t *testing.T) {
+	tests := []struct {
+		target string
+		want   int64
+		fails  bool
+	}{
+		{target: "/orders/7", want: 7},
+		{target: "/orders/0", fails: true},
+		{target: "/orders/-3", fails: true},
+		{target: "/orders/seven", fails: true},
+	}
+	for _, test := range tests {
+		t.Run(test.target, func(t *testing.T) {
+			id, err := httputil.ParamID(request(t, "/orders/:id", test.target), "id", "order")
+			if test.fails {
+				assertCode(t, err, errors.CodeInvalidRequest)
+				return
+			}
+			require.NoError(t, err)
+			assert.Equal(t, test.want, id)
+		})
+	}
+}
+
+func TestBindQuery(t *testing.T) {
+	var q struct {
+		Status string `form:"status" binding:"required,oneof=open paid"`
+	}
+	require.NoError(t, httputil.BindQuery(request(t, "/", "/?status=paid"), &q))
+	assert.Equal(t, "paid", q.Status)
+
+	assertCode(t, httputil.BindQuery(request(t, "/", "/?status=lost"), &q), errors.CodeInvalidRequest)
+}
+
+func TestSplitList(t *testing.T) {
+	assert.Equal(t, []string{"a", "b"}, httputil.SplitList(" a, ,b,"))
+	assert.Nil(t, httputil.SplitList(""))
+}

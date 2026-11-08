@@ -49,7 +49,8 @@ var Component = component.Component{
 		Gate: []project.GateStep{
 			{Name: "go format", Paths: []string{"**/*.go"}, Run: `test -z "$(gofmt -l .)"`},
 			{Name: "go vet", Paths: []string{"**/*.go", "go.mod", "go.sum"}, Run: "go vet ./..."},
-			{Name: "go test", Paths: []string{"**/*.go", "go.mod", "go.sum"}, Run: "go test ./..."},
+			// openapi.yaml too: go test is what fails on a file edited by hand.
+			{Name: "go test", Paths: []string{"**/*.go", "go.mod", "go.sum", "*/openapi.yaml"}, Run: "go test ./..."},
 		},
 		Doctor: []project.Check{
 			{Name: "go installed", Run: "go version"},

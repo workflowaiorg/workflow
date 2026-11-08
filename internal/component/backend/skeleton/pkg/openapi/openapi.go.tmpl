@@ -1,0 +1,308 @@
+// Package openapi describes a service's public HTTP routes in Go and turns that description into
+// the OpenAPI document its clients are built against. Package openapitest checks the responses
+// handler tests record against the committed document.
+//
+// Each handler package lists its own operations next to the types they send and receive, so a body
+// and its schema cannot drift apart: the schema is reflected from the struct the handler binds or
+// writes.
+package openapi
+
+import (
+	"fmt"
+	"net/http"
+	"reflect"
+	"regexp"
+	"slices"
+	"strings"
+	"time"
+	"unicode"
+
+	"github.com/swaggest/jsonschema-go"
+	"github.com/swaggest/openapi-go"
+	"github.com/swaggest/openapi-go/openapi3"
+
+	"[[ .module ]]/pkg/httputil"
+)
+
+// Operation is one public route: what it reads and what it answers with when it succeeds. Every
+// operation also answers with the error envelope on any other status, so errors are never listed.
+type Operation struct {
+	Method string
+	// Path is the route as Gin registers it, group prefix included: /orders/:id. Every path
+	// parameter is documented as an integer ID, read with httputil.ParamID.
+	Path string
+	// Query is the struct the handler binds its query into with httputil.BindQuery. A field's
+	// `form` tag names the parameter for Gin and for the document alike.
+	Query any
+	// Request is the JSON body. A struct whose fields carry `formData:"name"` tags is a multipart
+	// form instead.
+	Request any
+	// RequestContentType is the body's media type when it is not JSON. Without Request, the body
+	// is one no struct describes, and the document says only its media type.
+	RequestContentType string
+	// Status is the success status; zero means 200.
+	Status int
+	// Response is what the success envelope carries under `data`. Nil means the success response
+	// has no body, as a redirect's.
+	Response any
+	// Sunset deprecates the operation: it may be removed once this date (YYYY-MM-DD) has passed,
+	// and not before.
+	Sunset string
+}
+
+// sunsetTag deprecates a field as Operation.Sunset deprecates a route:
+//
+//	OldName string `json:"old_name" deprecated:"true" sunset:"2027-01-01"`
+const sunsetTag = "sunset"
+
+// errorResponse is the body of every response that is not a success.
+type errorResponse struct {
+	Error httputil.Error `json:"error"`
+}
+
+var ginParam = regexp.MustCompile(`:(\w+)`)
+
+// Build reflects the operations into an OpenAPI 3.0 document, as YAML. The order they are listed
+// in does not change it.
+func Build(operations []Operation) ([]byte, error) {
+	reflector := openapi3.NewReflector()
+	reflector.Spec.Info.
+		WithTitle("API").
+		WithVersion("1").
+		WithDescription("Generated from the service's Go types by its cmd/openapi. Do not edit by hand.")
+	fields := &fieldRules{requestTypes: map[reflect.Type]bool{}, requestSchemas: map[*jsonschema.Schema]bool{}}
+	responseTypes := map[reflect.Type]bool{}
+	for _, operation := range operations {
+		if operation.Request != nil {
+			structsIn(reflect.TypeOf(operation.Request), fields.requestTypes)
+		}
+		if operation.Response != nil {
+			structsIn(reflect.TypeOf(operation.Response), responseTypes)
+		}
+	}
+	// One schema cannot say both which fields a request must send and which a response always
+	// has, so a type is read or answered with, never both.
+	var shared []string
+	for t, hasFields := range fields.requestTypes {
+		if hasFields && responseTypes[t] {
+			shared = append(shared, t.String())
+		}
+	}
+	if len(shared) > 0 {
+		slices.Sort(shared)
+		return nil, fmt.Errorf("%s is both in a request and in a response: give each its own type", strings.Join(shared, ", "))
+	}
+	reflector.DefaultOptions = append(reflector.DefaultOptions,
+		jsonschema.InterceptSchema(fields.noteRequestSchema),
+		jsonschema.InterceptProp(fields.markRequiredAndSunset),
+		jsonschema.InterceptDefName(definitionName),
+	)
+
+	sorted := slices.Clone(operations)
+	slices.SortFunc(sorted, func(a, b Operation) int {
+		return strings.Compare(a.Path+" "+a.Method, b.Path+" "+b.Method)
+	})
+	for _, operation := range sorted {
+		if err := add(reflector, operation); err != nil {
+			return nil, fmt.Errorf("%s %s: %w", operation.Method, operation.Path, err)
+		}
+	}
+	return reflector.Spec.MarshalYAML()
+}
+
+// Path turns a Gin route pattern into an OpenAPI path template: /orders/:id is /orders/{id}.
+func Path(ginPath string) string {
+	return ginParam.ReplaceAllString(ginPath, "{$1}")
+}
+
+func add(reflector *openapi3.Reflector, operation Operation) error {
+	oc, err := reflector.NewOperationContext(operation.Method, Path(operation.Path))
+	if err != nil {
+		return err
+	}
+	if operation.Query != nil {
+		oc.AddReqStructure(operation.Query)
+	}
+	if operation.Request == nil && operation.RequestContentType != "" {
+		oc.(openapi3.OperationExposer).Operation().WithRequestBody(openapi3.RequestBodyOrRef{
+			RequestBody: (&openapi3.RequestBody{}).WithRequired(true).WithContent(map[string]openapi3.MediaType{
+				operation.RequestContentType: {Schema: &openapi3.SchemaOrRef{Schema: &openapi3.Schema{}}},
+			}),
+		})
+	}
+	if operation.Request != nil {
+		oc.AddReqStructure(operation.Request, func(cu *openapi.ContentUnit) {
+			if operation.RequestContentType != "" {
+				cu.ContentType = operation.RequestContentType
+			}
+		})
+	}
+
+	status := operation.Status
+	if status == 0 {
+		status = http.StatusOK
+	}
+	if operation.Response == nil {
+		oc.AddRespStructure(nil, openapi.WithHTTPStatus(status))
+	} else {
+		oc.AddRespStructure(envelope(operation.Response), openapi.WithHTTPStatus(status))
+	}
+	oc.AddRespStructure(errorResponse{}, func(cu *openapi.ContentUnit) {
+		cu.IsDefault = true
+		cu.Description = "Any failure, with the error envelope."
+	})
+
+	spec := oc.(openapi3.OperationExposer).Operation()
+	required := true
+	for _, match := range ginParam.FindAllStringSubmatch(operation.Path, -1) {
+		spec.Parameters = append(spec.Parameters, openapi3.ParameterOrRef{Parameter: &openapi3.Parameter{
+			Name:     match[1],
+			In:       openapi3.ParameterInPath,
+			Required: &required,
+			Schema:   &openapi3.SchemaOrRef{Schema: (&openapi3.Schema{}).WithType(openapi3.SchemaTypeInteger).WithFormat("int64")},
+		}})
+	}
+	if operation.Sunset != "" {
+		if _, err := time.Parse(time.DateOnly, operation.Sunset); err != nil {
+			return fmt.Errorf("sunset %q is not a YYYY-MM-DD date", operation.Sunset)
+		}
+		spec.WithDeprecated(true).WithMapOfAnythingItem("x-sunset", operation.Sunset)
+	}
+	if err := reflector.AddOperation(oc); err != nil {
+		return err
+	}
+	if operation.Query == nil {
+		dropQueryParameters(reflector, operation)
+	}
+	return nil
+}
+
+// dropQueryParameters removes the query parameters the reflector read from a request body. It
+// takes Gin's `form` tag for a query parameter as well as a form field, so a form body would
+// otherwise be documented as a query too. An operation's query comes from its Query alone.
+func dropQueryParameters(reflector *openapi3.Reflector, operation Operation) {
+	path := Path(operation.Path)
+	item := reflector.Spec.Paths.MapOfPathItemValues[path]
+	method := strings.ToLower(operation.Method)
+	spec := item.MapOfOperationValues[method]
+	spec.Parameters = slices.DeleteFunc(spec.Parameters, func(p openapi3.ParameterOrRef) bool {
+		return p.Parameter != nil && p.Parameter.In == openapi3.ParameterInQuery
+	})
+	item.MapOfOperationValues[method] = spec
+	reflector.Spec.Paths.MapOfPathItemValues[path] = item
+}
+
+// envelope wraps a response type in the {data: …} object httputil.Success writes. The wrapper is
+// an unnamed struct, so the document inlines it rather than naming one schema per route.
+func envelope(response any) any {
+	return reflect.New(reflect.StructOf([]reflect.StructField{{
+		Name: "Data",
+		Type: reflect.TypeOf(response),
+		Tag:  `json:"data"`,
+	}})).Elem().Interface()
+}
+
+// structsIn adds to found every struct type with exported fields that t is made of, t included:
+// through its fields, elements and pointers, all the way down.
+func structsIn(t reflect.Type, found map[reflect.Type]bool) {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Array || t.Kind() == reflect.Map {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	if _, seen := found[t]; seen {
+		return
+	}
+	// Marked before its fields are walked, so a type that holds itself ends the walk.
+	found[t] = false
+	for i := range t.NumField() {
+		if field := t.Field(i); field.IsExported() {
+			// A struct with no exported field, such as time.Time, has no properties to require.
+			found[t] = true
+			structsIn(field.Type, found)
+		}
+	}
+}
+
+// fieldRules decides which properties are required, which differs between the two directions: a
+// request property is required when the handler refuses a body without it, and a response property
+// is required when the server always writes it.
+type fieldRules struct {
+	// requestTypes holds every struct a request body is made of, nested ones included.
+	requestTypes map[reflect.Type]bool
+	// requestSchemas holds the schema being built for each request type, so a property can tell
+	// which kind of struct it belongs to.
+	requestSchemas map[*jsonschema.Schema]bool
+}
+
+func (f *fieldRules) noteRequestSchema(params jsonschema.InterceptSchemaParams) (bool, error) {
+	if !params.Processed && params.Value.IsValid() && f.requestTypes[params.Value.Type()] {
+		f.requestSchemas[params.Schema] = true
+	}
+	return false, nil
+}
+
+// markRequiredAndSunset marks the required properties and gives a deprecated field its sunset date.
+// A response field written every time must be required: otherwise removing it reads as an optional
+// property going away, which no breaking-change check fails on. And a deprecated field without a
+// date could be removed the next day.
+func (f *fieldRules) markRequiredAndSunset(params jsonschema.InterceptPropParams) error {
+	if !params.Processed {
+		return nil
+	}
+	name, options, _ := strings.Cut(params.Field.Tag.Get("json"), ",")
+	required := name != "" && name != "-" && !strings.Contains(options, "omitempty")
+	if f.requestSchemas[params.ParentSchema] {
+		required = slices.Contains(strings.Split(params.Field.Tag.Get("binding"), ","), "required")
+	}
+	if required && !slices.Contains(params.ParentSchema.Required, params.Name) {
+		params.ParentSchema.Required = append(params.ParentSchema.Required, params.Name)
+	}
+
+	sunset, hasSunset := params.Field.Tag.Lookup(sunsetTag)
+	deprecated := params.Field.Tag.Get("deprecated") == "true"
+	switch {
+	case deprecated && !hasSunset:
+		return fmt.Errorf("field %s is deprecated without a %q tag", params.Field.Name, sunsetTag)
+	case hasSunset && !deprecated:
+		return fmt.Errorf("field %s has a %q tag but is not deprecated", params.Field.Name, sunsetTag)
+	case hasSunset:
+		if _, err := time.Parse(time.DateOnly, sunset); err != nil {
+			return fmt.Errorf("field %s: sunset %q is not a YYYY-MM-DD date", params.Field.Name, sunset)
+		}
+		params.PropertySchema.WithExtraPropertiesItem("x-sunset", sunset)
+	}
+	return nil
+}
+
+// definitionName names a schema after its type, and a handler package's type after its domain
+// too, unless the name starts with it already: model.Order is Order, order/http's placeRequest is
+// OrderPlaceRequest, and its orderResponse is OrderResponse.
+func definitionName(t reflect.Type, defaultName string) string {
+	if t.Name() == "" {
+		return defaultName
+	}
+	name := capitalize(t.Name())
+	parts := strings.Split(t.PkgPath(), "/")
+	for i, part := range parts {
+		if part == "handler" && i+1 < len(parts) {
+			if domain := capitalize(parts[i+1]); !strings.HasPrefix(name, domain) {
+				return domain + name
+			}
+			return name
+		}
+	}
+	switch parts[len(parts)-1] {
+	case "model", "openapi":
+		return name
+	default:
+		return capitalize(parts[len(parts)-1]) + name
+	}
+}
+
+func capitalize(s string) string {
+	r := []rune(s)
+	r[0] = unicode.ToUpper(r[0])
+	return string(r)
+}

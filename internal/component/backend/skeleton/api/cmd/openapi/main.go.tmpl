@@ -1,0 +1,45 @@
+// Command openapi writes the service's openapi.yaml from its Go types. Run it from the root after
+// changing a public route or a type one reads or answers with, and commit the file:
+//
+//	go run ./api/cmd/openapi
+package main
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"strings"
+
+	"[[ .module ]]/api/internal/route"
+	"[[ .module ]]/pkg/logging"
+	"[[ .module ]]/pkg/openapi"
+)
+
+func main() {
+	logging.Init()
+	ctx := context.Background()
+	// The service is read from this command's own package path, so a copy of it in another service
+	// writes that service's file.
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		logging.Error(ctx, "reading the build info failed")
+		os.Exit(1)
+	}
+	service := strings.TrimSuffix(strings.TrimPrefix(info.Path, info.Main.Path+"/"), "/cmd/openapi")
+	if _, err := os.Stat(filepath.Join(service, "cmd", "openapi")); err != nil {
+		logging.Error(ctx, "run it from the root, as go run ./"+service+"/cmd/openapi", "error", err)
+		os.Exit(1)
+	}
+
+	document, err := openapi.Build(route.Operations())
+	if err != nil {
+		logging.Error(ctx, "building the OpenAPI document failed", "error", err)
+		os.Exit(1)
+	}
+	path := filepath.Join(service, "openapi.yaml")
+	if err := os.WriteFile(path, document, 0o644); err != nil {
+		logging.Error(ctx, "writing the OpenAPI document failed", "path", path, "error", err)
+		os.Exit(1)
+	}
+}

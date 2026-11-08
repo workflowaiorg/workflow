@@ -42,6 +42,11 @@ Before setting a status, check that the Issue carries exactly one `status:` labe
 The board is the Issue list by status: `gh issue list --label "status: in review"`. It shows open
 Issues only: a closed Issue keeps the status it had.
 
+**A label a CI job reads**, such as `api-passthrough`, which lets the backend's breaking-change job
+accept a break, is a plain one on the pull request: `gh pr edit <n> --add-label api-passthrough`.
+Adding it starts a new run, as the calling workflow listens to `labeled`; re-running an old run
+does not see it, as a run reads the labels its event carried.
+
 ## Milestones
 
 - **List the open ones** before assigning or creating: `gh api "repos/{owner}/{repo}/milestones?state=open"`.

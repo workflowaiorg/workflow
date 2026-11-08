@@ -1,0 +1,10 @@
+package http
+
+import "[[ .module ]]/pkg/openapi"
+
+// Operations describes the health routes, for the service's openapi.yaml.
+func Operations() []openapi.Operation {
+	return []openapi.Operation{
+		{Method: "GET", Path: "/health", Response: statusResponse{}},
+	}
+}

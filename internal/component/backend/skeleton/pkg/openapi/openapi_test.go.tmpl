@@ -1,0 +1,179 @@
+package openapi_test
+
+import (
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
+
+	"[[ .module ]]/pkg/openapi"
+)
+
+type thing struct {
+	ID      int64   `json:"id"`
+	Note    *string `json:"note,omitempty"`
+	OldName string  `json:"old_name" deprecated:"true" sunset:"2027-01-01"`
+}
+
+type thingResponse struct {
+	Thing thing `json:"thing"`
+}
+
+type createThingRequest struct {
+	Name  string `json:"name" binding:"required,max=10"`
+	Color string `json:"color"`
+}
+
+// testSchema is the name the document gives a type declared in this test package.
+func testSchema(name string) string { return "Openapi_test" + name }
+
+// document builds the operations and decodes the YAML, so a test can walk it as a tree.
+func document(t *testing.T, operations ...openapi.Operation) map[string]any {
+	t.Helper()
+	raw, err := openapi.Build(operations)
+	require.NoError(t, err)
+	var tree map[string]any
+	require.NoError(t, yaml.Unmarshal(raw, &tree))
+	return tree
+}
+
+func dig(t *testing.T, tree any, keys ...string) any {
+	t.Helper()
+	for _, key := range keys {
+		object, ok := tree.(map[string]any)
+		require.True(t, ok, "no object at %q", key)
+		tree, ok = object[key]
+		require.True(t, ok, "no key %q", key)
+	}
+	return tree
+}
+
+func TestResponseFieldsWrittenEveryTimeAreRequired(t *testing.T) {
+	tree := document(t, openapi.Operation{Method: "GET", Path: "/things/:id", Response: thingResponse{}})
+
+	required := dig(t, tree, "components", "schemas", testSchema("Thing"), "required")
+	assert.ElementsMatch(t, []any{"id", "old_name"}, required, "note is omitempty, so it is optional")
+}
+
+func TestRequestFieldsAreRequiredOnlyWhenTheHandlerRefusesThemMissing(t *testing.T) {
+	tree := document(t, openapi.Operation{Method: "POST", Path: "/things", Request: createThingRequest{}, Response: thingResponse{}})
+
+	required := dig(t, tree, "components", "schemas", testSchema("CreateThingRequest"), "required")
+	assert.Equal(t, []any{"name"}, required)
+}
+
+func TestTheResponseIsInTheDataEnvelopeAndEveryFailureInTheErrorOne(t *testing.T) {
+	tree := document(t, openapi.Operation{Method: "POST", Path: "/things", Status: 201, Response: thingResponse{}})
+	responses := dig(t, tree, "paths", "/things", "post", "responses")
+
+	success := dig(t, responses, "201", "content", "application/json", "schema")
+	assert.Equal(t, []any{"data"}, dig(t, success, "required"))
+	assert.Equal(t, "#/components/schemas/"+testSchema("ThingResponse"), dig(t, success, "properties", "data", "$ref"))
+
+	failure := dig(t, responses, "default", "content", "application/json", "schema", "$ref")
+	assert.Equal(t, "#/components/schemas/ErrorResponse", failure)
+}
+
+func TestGinParamsArePathParameters(t *testing.T) {
+	tree := document(t, openapi.Operation{Method: "GET", Path: "/things/:id/parts/:part_id2", Response: thingResponse{}})
+
+	parameters := dig(t, tree, "paths", "/things/{id}/parts/{part_id2}", "get", "parameters").([]any)
+	require.Len(t, parameters, 2)
+	assert.Equal(t, "id", dig(t, parameters[0], "name"))
+	assert.Equal(t, "part_id2", dig(t, parameters[1], "name"))
+	assert.Equal(t, "path", dig(t, parameters[1], "in"))
+}
+
+func TestAStructNestedInARequestHasTheRequestRules(t *testing.T) {
+	type line struct {
+		SKU   string `json:"sku" binding:"required"`
+		Count int    `json:"count"`
+	}
+	type orderRequest struct {
+		Lines []line `json:"lines" binding:"required"`
+	}
+	tree := document(t, openapi.Operation{Method: "POST", Path: "/orders", Request: orderRequest{}, Response: thingResponse{}})
+
+	assert.Equal(t, []any{"sku"}, dig(t, tree, "components", "schemas", testSchema("Line"), "required"))
+}
+
+func TestBuildRefusesATypeBothReadAndAnsweredWith(t *testing.T) {
+	type createRequest struct {
+		Thing thing `json:"thing"`
+	}
+	_, err := openapi.Build([]openapi.Operation{
+		{Method: "POST", Path: "/things", Request: createRequest{}, Response: thingResponse{}},
+	})
+	assert.ErrorContains(t, err, "openapi_test.thing is both in a request and in a response")
+}
+
+func TestARedirectHasNoBody(t *testing.T) {
+	tree := document(t, openapi.Operation{Method: "GET", Path: "/confirm", Status: 302})
+
+	found := dig(t, tree, "paths", "/confirm", "get", "responses", "302").(map[string]any)
+	assert.NotContains(t, found, "content")
+}
+
+func TestADeprecationCarriesItsSunsetDate(t *testing.T) {
+	tree := document(t, openapi.Operation{Method: "GET", Path: "/things/:id", Response: thingResponse{}, Sunset: "2027-03-01"})
+
+	operation := dig(t, tree, "paths", "/things/{id}", "get")
+	assert.Equal(t, true, dig(t, operation, "deprecated"))
+	assert.Equal(t, "2027-03-01", dig(t, operation, "x-sunset"))
+
+	field := dig(t, tree, "components", "schemas", testSchema("Thing"), "properties", "old_name")
+	assert.Equal(t, true, dig(t, field, "deprecated"))
+	assert.Equal(t, "2027-01-01", dig(t, field, "x-sunset"))
+}
+
+// A deprecation with no date could be removed the next day.
+func TestBuildRefusesADeprecationWithoutAValidSunset(t *testing.T) {
+	type noDate struct {
+		Old string `json:"old" deprecated:"true"`
+	}
+	type badDate struct {
+		Old string `json:"old" deprecated:"true" sunset:"next year"`
+	}
+	type dateOnly struct {
+		Old string `json:"old" sunset:"2027-01-01"`
+	}
+	tests := []struct {
+		name      string
+		operation openapi.Operation
+	}{
+		{name: "a field without a sunset", operation: openapi.Operation{Method: "GET", Path: "/a", Response: noDate{}}},
+		{name: "a field with a bad sunset", operation: openapi.Operation{Method: "GET", Path: "/a", Response: badDate{}}},
+		{name: "a sunset without deprecated", operation: openapi.Operation{Method: "GET", Path: "/a", Response: dateOnly{}}},
+		{name: "a route with a bad sunset", operation: openapi.Operation{Method: "GET", Path: "/a", Response: thingResponse{}, Sunset: "soon"}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := openapi.Build([]openapi.Operation{test.operation})
+			assert.Error(t, err)
+		})
+	}
+}
+
+func TestBuildIsTheSameWhateverTheOrder(t *testing.T) {
+	operations := []openapi.Operation{
+		{Method: "POST", Path: "/things", Request: createThingRequest{}, Response: thingResponse{}},
+		{Method: "GET", Path: "/things/:id", Response: thingResponse{}},
+	}
+	first, err := openapi.Build(operations)
+	require.NoError(t, err)
+	second, err := openapi.Build([]openapi.Operation{operations[1], operations[0]})
+	require.NoError(t, err)
+	assert.Equal(t, string(first), string(second))
+}
+
+func TestAFormBodyIsNotAlsoAQuery(t *testing.T) {
+	type uploadRequest struct {
+		Name string `form:"name" formData:"name" binding:"required"`
+	}
+	tree := document(t, openapi.Operation{Method: "POST", Path: "/uploads", Request: uploadRequest{}, Response: thingResponse{}})
+
+	operation := dig(t, tree, "paths", "/uploads", "post").(map[string]any)
+	assert.NotContains(t, operation, "parameters")
+	assert.Contains(t, dig(t, operation, "requestBody", "content").(map[string]any), "application/x-www-form-urlencoded")
+}

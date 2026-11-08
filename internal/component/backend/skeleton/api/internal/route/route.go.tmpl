@@ -1,0 +1,30 @@
+// Package route wires each domain, one file each: gateways and repositories, then the controller,
+// then the handler, then its routes.
+package route
+
+import (
+	"context"
+	"fmt"
+	"slices"
+
+	"github.com/gin-gonic/gin"
+
+	"[[ .module ]]/api/internal/app"
+	healthhttp "[[ .module ]]/api/internal/handler/health/http"
+	"[[ .module ]]/pkg/openapi"
+)
+
+// Register registers every route of the service on r. ctx ends when the service is told to stop.
+func Register(ctx context.Context, application *app.App, r gin.IRouter) error {
+	if err := RegisterHealthRoutes(ctx, application, r); err != nil {
+		return fmt.Errorf("health routes: %w", err)
+	}
+	return nil
+}
+
+// Operations describes every route Register registers, for the service's openapi.yaml.
+func Operations() []openapi.Operation {
+	return slices.Concat(
+		healthhttp.Operations(),
+	)
+}

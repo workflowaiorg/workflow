@@ -6,11 +6,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 
 	healthhttp "[[ .module ]]/api/internal/handler/health/http"
 	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/openapi/openapitest"
 )
 
 // controller is a hand-written stand-in for the health controller.
@@ -38,8 +38,7 @@ func TestShow(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			gin.SetMode(gin.TestMode)
-			r := gin.New()
+			r := openapitest.Engine(t)
 			r.GET("/health", healthhttp.New(test.ctrl).Show)
 
 			w := httptest.NewRecorder()

@@ -1,6 +1,6 @@
 ---
 name: api-design
-description: "The layers of a service and what each may do: handlers, controllers, gateways, repositories, routes, models and response bodies, with dependencies pointing inward only."
+description: "The layers of a service and what each may do: handlers, controllers, gateways, repositories, routes, models and response bodies, with dependencies pointing inward only; and the OpenAPI contract every public route is in."
 ---
 
 # Skill: API design
@@ -14,6 +14,7 @@ concrete types meet only in `route/`.
 - Writing a handler, controller, gateway or repository
 - Wiring a domain in `internal/route/`, or adding a route
 - Writing a response body, a model, or a service's own middleware
+- Changing anything a public route reads or answers with: its operation, `openapi.yaml`
 
 ## Handler: `internal/handler/<domain>/<transport>/`
 
@@ -21,23 +22,29 @@ concrete types meet only in `route/`.
   `*app.App` when it needs it) in `New`.
 - Reads and validates the request, calls the controller, and answers with `pkg/httputil`.
 - Holds no business logic and calls no gateway.
-- Binds a request body to a struct declared in the method, unless several methods share it.
+- Binds a request body, or a query, to a named, unexported struct declared just above the method,
+  so the route's operation can name it. A query is bound with `httputil.BindQuery`, never read by
+  name; a path ID with `httputil.ParamID`. A type is read or answered with, never both: a request
+  holds types of its own, as the document gives each direction its own required fields.
 
 ```go
 type Controller interface {
-    Place(ctx context.Context, customerID int64, items []model.Item) (*model.Order, error)
+    Place(ctx context.Context, customerID int64, skus []string) (*model.Order, error)
+}
+
+// placeRequest is the body of POST /orders.
+type placeRequest struct {
+    CustomerID int64    `json:"customer_id" binding:"required"`
+    SKUs       []string `json:"skus" binding:"required,min=1"`
 }
 
 func (h *Handler) Place(c *gin.Context) {
-    var req struct {
-        CustomerID int64        `json:"customer_id" binding:"required"`
-        Items      []model.Item `json:"items" binding:"required,min=1"`
-    }
+    var req placeRequest
     if err := c.ShouldBindJSON(&req); err != nil {
         httputil.RespondWithError(c, httputil.BindError(err))
         return
     }
-    order, err := h.ctrl.Place(c.Request.Context(), req.CustomerID, req.Items)
+    order, err := h.ctrl.Place(c.Request.Context(), req.CustomerID, req.SKUs)
     if err != nil {
         httputil.RespondWithError(c, err)
         return
@@ -53,7 +60,11 @@ Every response body is a named, unexported struct in the handler package's `resp
 
 - A collection is named by its plural noun; it has `has_more` only when the endpoint takes an
   offset.
-- A key that is sometimes absent is a pointer with `omitempty`: absent, not `null`.
+- A key that is sometimes absent is a pointer with `omitempty`: absent, not `null`. A key clients
+  rely on is never `omitempty`: removing an optional key breaks no check, so it was never promised.
+- Keys are `snake_case`. An ID is a number. A time is an RFC 3339 string, which a `time.Time`
+  is. Money is an integer in minor units, such as cents, with its currency code beside it:
+  `"price": 1250, "currency": "EUR"`.
 
 ## Controller: `internal/controller/<domain>/`
 
@@ -109,6 +120,58 @@ func RegisterOrderRoutes(ctx context.Context, application *app.App, r gin.IRoute
 }
 ```
 
+## The OpenAPI contract: `<service>/openapi.yaml`
+
+A service's `openapi.yaml` is the contract its clients are built against. It is generated from the
+Go types and committed; nobody edits it by hand.
+
+**Every public route has an operation** in its handler package's `openapi.go`, beside the types it
+names:
+
+```go
+func Operations() []openapi.Operation {
+    return []openapi.Operation{
+        {Method: "GET", Path: "/orders", Query: listQuery{}, Response: ordersResponse{}},
+        {Method: "POST", Path: "/orders", Request: placeRequest{}, Status: http.StatusCreated, Response: orderResponse{}},
+        {Method: "GET", Path: "/orders/:id", Response: orderResponse{}},
+    }
+}
+```
+
+`Path` is Gin's, group prefix included. `Response` is what `httputil.Success` puts under `data`:
+the document adds the envelope itself, and gives every operation the error envelope for any other
+status. `Status` is set only when success is not 200; a redirect has no `Response`. A new handler
+package adds its `Operations()` to `route.Operations()`, and its routes to `route.Register`. A
+paged list's query is `httputil.PageQuery`, or a struct that embeds it.
+
+**Then regenerate, and commit the file**, after changing a route, an operation, a type a route
+reads or answers with (a request, a response, a model either embeds), `pkg/httputil` or
+`pkg/errors`:
+
+```bash
+go run ./api/cmd/openapi
+```
+
+**What fails, and where:**
+
+| A change that… | Fails in |
+|---|---|
+| registers a route with no operation, or leaves an operation whose route is gone | `TestRegisterMatchesTheOperations`, in `internal/route/` |
+| changes a type or a route and leaves `openapi.yaml` behind, or edits it by hand | `TestTheOpenAPIDocumentIsUpToDate`, in `internal/route/` |
+| answers with a body `openapi.yaml` does not allow | the handler's own tests, through `openapitest`: the `testing` skill |
+| removes a required field or a route, or changes anything else a client relies on | the CI's breaking-change job, unless the MR carries `api-passthrough` |
+
+`go test ./...` runs the first three. The last runs only in CI, where the MR's labels are known.
+
+**Breaking a client on purpose**, removing or renaming a required field or a route, takes the
+`api-passthrough` label on the MR: the job prints every break and passes, and the reviewer accepts
+them by approving. Use it only for what no client outside the repository relies on yet.
+
+**Retiring a required field or a route without the label** takes two MRs. The first deprecates it
+with a sunset date no earlier than the day it merges: `Sunset: "2027-03-01"` on the operation, or
+`deprecated:"true" sunset:"2027-03-01"` on the field. Once the date has passed, the second removes
+it, and the breaking-change job lets the removal through.
+
 ## Model: `internal/model/`
 
 - The domain's structs, used by every layer, with `json` tags.
@@ -129,3 +192,5 @@ signed-in user, is in its `internal/middleware`.
 - [ ] Every response body is a named struct in `response.go`
 - [ ] Gateways and repositories return models and `APIError`s only
 - [ ] Each domain is wired in one `route/` file, closing what it opened when it fails
+- [ ] Every public route has an operation, and `openapi.yaml` was regenerated and committed
+- [ ] A break a client would see has a sunset that has passed, or the MR carries `api-passthrough`

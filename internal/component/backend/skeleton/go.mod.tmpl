@@ -1,6 +1,14 @@
 module [[ .module ]]
 
 go 1.25
+
+// The versions api/openapi.yaml was generated with: a newer one may write it differently, and the
+// test that it is up to date would fail in a project that changed nothing.
+require (
+	github.com/getkin/kin-openapi v0.153.0
+	github.com/swaggest/jsonschema-go v0.3.79
+	github.com/swaggest/openapi-go v0.2.61
+)
 [[- if .postgres ]]
 
 // The last goose and testcontainers-go that build with Go 1.25; newer ones need Go 1.26.
