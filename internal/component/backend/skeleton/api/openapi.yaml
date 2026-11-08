@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  description: Generated from the service's Go types by its cmd/openapi. Do not edit
+    by hand.
+  title: API
+  version: "1"
+paths:
+  /health:
+    get:
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                properties:
+                  data:
+                    $ref: '#/components/schemas/HealthStatusResponse'
+                required:
+                - data
+                type: object
+          description: OK
+        default:
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+          description: Any failure, with the error envelope.
+components:
+  schemas:
+    ErrorResponse:
+      properties:
+        error:
+          $ref: '#/components/schemas/HttputilError'
+      required:
+      - error
+      type: object
+    HealthStatusResponse:
+      properties:
+        status:
+          type: string
+      required:
+      - status
+      type: object
+    HttputilError:
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+      required:
+      - code
+      - message
+      type: object

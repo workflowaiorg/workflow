@@ -19,6 +19,8 @@ Every service is built the same way, so anyone who knows one knows them all.
 ```text
 <service>/
 ├── cmd/http/main.go          # the entrypoint; cmd/grpc/ for a gRPC service
+├── cmd/openapi/main.go       # writes openapi.yaml from the routes' operations
+├── openapi.yaml              # the HTTP contract, generated: see the api-design skill
 └── internal/
     ├── app/app.go            # App: settings and connections opened once, shared by the routes
     ├── config/config.go      # Config and Load(): see the configuration skill
@@ -45,8 +47,8 @@ The order never changes:
 4. `ctx` from `signal.NotifyContext`, which ends on SIGINT or SIGTERM.
 5. `gin.New()` (never `gin.Default()`), with `gin.Recovery()` and `middleware.CorrelationID()`, and
    `SetTrustedProxies` set explicitly.
-6. Register each domain's routes, passing `ctx`; a registration that returns an error is logged and
-   exits 1.
+6. `route.Register(ctx, application, r)`, which registers each domain's routes; an error is logged
+   and exits 1.
 7. Serve until `ctx` ends, then shut down with a timeout, so requests in flight finish.
 
 `api/cmd/http/main.go` is the reference: copy it.
@@ -85,8 +87,9 @@ The local stack is `docker-compose.yaml` at the project's root; run compose ther
 ## A new service
 
 1. Copy `api/` to `<service>/` and replace `api` in its import paths.
-2. Keep `internal/config`, `internal/app`, the health route and `cmd/http/main.go`; remove the
-   domains it does not have.
+2. Keep `internal/config`, `internal/app`, the health route, `cmd/http/main.go` and
+   `cmd/openapi/main.go`; remove the domains it does not have, from `route.Register` and
+   `route.Operations()` too, and regenerate its `openapi.yaml` with `go run ./<service>/cmd/openapi`.
 3. Add it to `docker-compose.yaml`, as `api` is, with a host port of its own.
 4. `go vet ./... && go test ./...`, then `docker compose up -d`, and check that its `/health`
    answers on its port, as *Running it* says.

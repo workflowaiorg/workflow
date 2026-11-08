@@ -32,8 +32,8 @@ func main() {
 		logging.Error(ctx, "setting trusted proxies", "error", err)
 		os.Exit(1)
 	}
-	if err := route.RegisterHealthRoutes(ctx, application, r); err != nil {
-		logging.Error(ctx, "registering the health routes", "error", err)
+	if err := route.Register(ctx, application, r); err != nil {
+		logging.Error(ctx, "registering the routes", "error", err)
 		os.Exit(1)
 	}
 

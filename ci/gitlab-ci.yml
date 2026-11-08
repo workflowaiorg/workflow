@@ -39,6 +39,48 @@ wf:spec-coverage:
   script:
     - wf spec-coverage
 
+# Fails on a change to a service's openapi.yaml that breaks a client of the target branch's copy,
+# unless the merge request carries the api-passthrough label; the api-design skill has the rules.
+# GitLab reads labels when a pipeline starts: after adding the label, run the pipeline again. It
+# runs in merge request pipelines only: a branch or default-branch pipeline has no labels to read,
+# so a break accepted on purpose would fail there. It is no gate step: it needs the labels.
+openapi:breaking:
+  image:
+    name: tufin/oasdiff:v1.35.0
+    entrypoint: [""]
+  rules:
+    - if: $CI_PIPELINE_SOURCE != "merge_request_event"
+      when: never
+    - exists: [go.mod]
+      changes: ["*/openapi.yaml"]
+  script:
+    - |
+      set -e
+      git config --global --add safe.directory "$CI_PROJECT_DIR"
+      # Against the commit the merge request started from, so a change merged since does not read
+      # as one this branch made.
+      git fetch --depth=1 origin "$CI_MERGE_REQUEST_DIFF_BASE_SHA"
+      case ",$CI_MERGE_REQUEST_LABELS," in
+        *,api-passthrough,*) passthrough=true ;;
+        *) passthrough=false ;;
+      esac
+      failed=0
+      for document in */openapi.yaml; do
+        [ -e "$document" ] || continue
+        if ! git cat-file -e "FETCH_HEAD:$document" 2>/dev/null; then
+          echo "$document is new: nothing to compare against."
+          continue
+        fi
+        git show "FETCH_HEAD:$document" > /tmp/base.yaml
+        if [ "$passthrough" = true ]; then
+          echo "api-passthrough: the breaks in $document below are accepted with this merge request."
+          oasdiff breaking /tmp/base.yaml "$document"
+        else
+          oasdiff breaking /tmp/base.yaml "$document" --fail-on ERR || failed=1
+        fi
+      done
+      exit $failed
+
 # The backend component: the steps of its gate.
 .wf:backend:
   image: golang:1.25
@@ -66,6 +108,6 @@ backend:go-test:
   extends: .wf:backend
   rules:
     - exists: [go.mod]
-      changes: ["**/*.go", go.mod, go.sum]
+      changes: ["**/*.go", go.mod, go.sum, "*/openapi.yaml"]
   script:
     - go test ./...

@@ -45,6 +45,12 @@ Before setting a status, check that the Issue carries exactly one `status::` lab
 The board has one column per `status::` label. Its columns show open Issues only: a closed Issue
 moves to "Closed" on its own, keeping the status it had.
 
+**A label a CI job reads**, such as `api-passthrough`, which lets the backend's breaking-change job
+accept a break, is a plain one on the merge request: `glab mr update <n> --label api-passthrough`.
+GitLab reads labels when a pipeline starts, so start a new merge request pipeline after adding
+it: `glab api -X POST "projects/:id/merge_requests/<n>/pipelines"`. Retrying a job, or a branch
+pipeline from `glab ci run`, still sees the labels it had.
+
 ## Milestones
 
 - **List the open ones** before assigning or creating: `glab api "projects/:id/milestones?state=active"`.

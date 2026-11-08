@@ -1,0 +1,111 @@
+package openapitest_test
+
+import (
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"[[ .module ]]/pkg/openapi/openapitest"
+)
+
+// recorder is a testing.TB that keeps the failures Check reports instead of failing the test, so
+// the cases below can assert that the checker fails at all: a checker that never fails would pass
+// every handler test.
+type recorder struct {
+	testing.TB
+	failures []string
+}
+
+func (r *recorder) Errorf(format string, args ...any) {
+	r.failures = append(r.failures, fmt.Sprintf(format, args...))
+}
+
+func (r *recorder) Fatalf(format string, args ...any) { r.Errorf(format, args...) }
+
+func (r *recorder) Helper() {}
+
+// document is the checker's own, so a change to a service's API never fails a test of the
+// checker: one list route with a required field, one with a path parameter, and the error envelope
+// on any other status.
+const document = `
+openapi: 3.0.3
+info: {title: checker test, version: "1"}
+paths:
+  /things:
+    get:
+      responses:
+        "200": {$ref: "#/components/responses/Things"}
+        default: {$ref: "#/components/responses/Error"}
+  /things/{id}:
+    get:
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer}}
+      responses:
+        "200": {$ref: "#/components/responses/Things"}
+        default: {$ref: "#/components/responses/Error"}
+components:
+  responses:
+    Things:
+      description: the things
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [data]
+            properties:
+              data:
+                type: object
+                required: [names]
+                properties:
+                  names: {type: array, items: {type: string}}
+    Error:
+      description: any failure
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: object
+                required: [code, message]
+                properties:
+                  code: {type: string}
+                  message: {type: string}
+`
+
+func TestCheckWith(t *testing.T) {
+	router, err := openapitest.NewRouter([]byte(document))
+	require.NoError(t, err)
+	json := http.Header{"Content-Type": []string{"application/json; charset=utf-8"}}
+
+	tests := []struct {
+		name   string
+		target string
+		status int
+		body   string
+		fails  bool
+	}{
+		{name: "a body the operation allows", target: "/things", status: 200, body: `{"data":{"names":["a"]}}`},
+		{name: "a required field missing", target: "/things", status: 200, body: `{"data":{}}`, fails: true},
+		{name: "a field of the wrong type", target: "/things", status: 200, body: `{"data":{"names":"a"}}`, fails: true},
+		{name: "the error envelope on a failure", target: "/things/7", status: 404, body: `{"error":{"code":"NOT_FOUND","message":"No such thing"}}`},
+		{name: "a success body on a failure status", target: "/things/7", status: 404, body: `{"data":{"names":[]}}`, fails: true},
+		{name: "a route the document does not have", target: "/nowhere", status: 200, body: `{"data":{}}`, fails: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			r := &recorder{TB: t}
+			openapitest.CheckWith(r, router, httptest.NewRequest(http.MethodGet, test.target, nil), test.status, json, []byte(test.body))
+			if test.fails {
+				assert.NotEmpty(t, r.failures)
+			} else {
+				assert.Empty(t, r.failures)
+			}
+		})
+	}
+}

@@ -1,0 +1,146 @@
+// Package openapitest checks the responses a handler test records against its service's committed
+// openapi.yaml.
+//
+// It reads the committed file, not one built from the Go types in the same run: a field removed
+// from a response struct would vanish from both, and nothing would fail. Against the file, the
+// handler test fails, and regenerating the file is the visible step that changes the contract.
+//
+// It is a package of its own because only tests import it: the handler packages import package
+// openapi for Operation, and this one would bring kin-openapi and the testing package into every
+// binary with it.
+package openapitest
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"sync"
+	"testing"
+
+	"github.com/getkin/kin-openapi/openapi3"
+	"github.com/getkin/kin-openapi/openapi3filter"
+	"github.com/getkin/kin-openapi/routers"
+	"github.com/getkin/kin-openapi/routers/gorillamux"
+	"github.com/gin-gonic/gin"
+)
+
+// committed loads, once per test binary, the openapi.yaml of the service under test: the nearest
+// one above the package directory go test runs in, such as api/openapi.yaml for
+// api/internal/handler/order/http.
+var committed = sync.OnceValues(func() (routers.Router, error) {
+	dir, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	for {
+		document, err := os.ReadFile(filepath.Join(dir, "openapi.yaml"))
+		if err == nil {
+			return NewRouter(document)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil || filepath.Dir(dir) == dir {
+			return nil, fmt.Errorf("no openapi.yaml in this package's service: generate it with its cmd/openapi")
+		}
+		dir = filepath.Dir(dir)
+	}
+})
+
+// NewRouter loads an OpenAPI document; Check uses the committed one.
+func NewRouter(document []byte) (routers.Router, error) {
+	doc, err := openapi3.NewLoader().LoadFromData(document)
+	if err != nil {
+		return nil, err
+	}
+	if err := doc.Validate(context.Background()); err != nil {
+		return nil, err
+	}
+	return gorillamux.NewRouter(doc)
+}
+
+// Engine is gin.New for a test that serves requests through a router. Every response it writes is
+// checked against the operation its request matches.
+func Engine(t testing.TB) *gin.Engine {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	r := gin.New()
+	r.Use(func(c *gin.Context) {
+		recorded := &recordingWriter{ResponseWriter: c.Writer}
+		c.Writer = recorded
+		c.Next()
+		Check(t, c.Request, recorded.Status(), recorded.Header(), recorded.body.Bytes())
+	})
+	return r
+}
+
+// Context is gin.CreateTestContext for a test that calls a handler method directly. When the test
+// ends, the response the handler wrote is checked against the operation the request matches.
+func Context(t testing.TB, w *httptest.ResponseRecorder) (*gin.Context, *gin.Engine) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
+	c, r := gin.CreateTestContext(w)
+	t.Cleanup(func() {
+		if c.Request != nil {
+			Check(t, c.Request, w.Code, w.Header(), w.Body.Bytes())
+		}
+	})
+	return c, r
+}
+
+// Check fails the test when the response does not satisfy the operation the request matches, or
+// when no operation matches it at all.
+func Check(t testing.TB, req *http.Request, status int, header http.Header, body []byte) {
+	t.Helper()
+	router, err := committed()
+	if err != nil {
+		t.Fatalf("openapi: loading openapi.yaml: %v", err)
+	}
+	CheckWith(t, router, req, status, header, body)
+}
+
+// CheckWith is Check against a document of the caller's own.
+func CheckWith(t testing.TB, router routers.Router, req *http.Request, status int, header http.Header, body []byte) {
+	t.Helper()
+	route, pathParams, err := router.FindRoute(req)
+	if err != nil {
+		t.Errorf("openapi: %s %s matches no operation in the document: %v", req.Method, req.URL.Path, err)
+		return
+	}
+	input := &openapi3filter.ResponseValidationInput{
+		RequestValidationInput: &openapi3filter.RequestValidationInput{
+			Request:    req,
+			PathParams: pathParams,
+			Route:      route,
+		},
+		Status: status,
+		Header: header,
+		Body:   io.NopCloser(bytes.NewReader(body)),
+		Options: &openapi3filter.Options{
+			IncludeResponseStatus: true,
+			MultiError:            true,
+		},
+	}
+	if err := openapi3filter.ValidateResponse(req.Context(), input); err != nil {
+		t.Errorf("openapi: %s %s answered %d with a body the document does not allow:\n%v\nbody: %s",
+			req.Method, route.Path, status, err, body)
+	}
+}
+
+// recordingWriter keeps a copy of the body as Gin writes it.
+type recordingWriter struct {
+	gin.ResponseWriter
+	body bytes.Buffer
+}
+
+func (w *recordingWriter) Write(b []byte) (int, error) {
+	w.body.Write(b)
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *recordingWriter) WriteString(s string) (int, error) {
+	w.body.WriteString(s)
+	return w.ResponseWriter.WriteString(s)
+}

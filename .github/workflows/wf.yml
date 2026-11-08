@@ -50,6 +50,7 @@ jobs:
       backend-go-format: ${{ steps.changes.outputs.backend-go-format }}
       backend-go-vet: ${{ steps.changes.outputs.backend-go-vet }}
       backend-go-test: ${{ steps.changes.outputs.backend-go-test }}
+      openapi-breaking: ${{ steps.changes.outputs.openapi-breaking }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -78,7 +79,8 @@ jobs:
           {
             echo "backend-go-format=$(changed go.mod '**/*.go')"
             echo "backend-go-vet=$(changed go.mod '**/*.go' 'go.mod' 'go.sum')"
-            echo "backend-go-test=$(changed go.mod '**/*.go' 'go.mod' 'go.sum')"
+            echo "backend-go-test=$(changed go.mod '**/*.go' 'go.mod' 'go.sum' '*/openapi.yaml')"
+            echo "openapi-breaking=$(changed go.mod '*/openapi.yaml')"
           } >> "$GITHUB_OUTPUT"
 
   # The backend component: the steps of its gate, with the Go go.mod names.
@@ -114,3 +116,43 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go test ./...
+
+  # Fails on a change to a service's openapi.yaml that breaks a client of the base's copy, unless
+  # the pull request carries the api-passthrough label; the api-design skill has the rules. The
+  # label is read from the event, so the calling workflow listens to labeled and unlabeled too. It
+  # judges pull requests only: a push carries no labels, so a break accepted on purpose would fail
+  # on the push that merges it. It is no gate step: it needs the labels.
+  openapi-breaking:
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.openapi-breaking == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - env:
+          PULL_REQUEST_BASE: ${{ github.event.pull_request.base.sha }}
+          PASSTHROUGH: ${{ contains(github.event.pull_request.labels.*.name, 'api-passthrough') }}
+        run: |
+          base=$PULL_REQUEST_BASE
+          if [ -z "$base" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            echo "Nothing to compare against."
+            exit 0
+          fi
+          failed=0
+          for document in */openapi.yaml; do
+            [ -e "$document" ] || continue
+            if ! git cat-file -e "$base:$document" 2>/dev/null; then
+              echo "$document is new: nothing to compare against."
+              continue
+            fi
+            git show "$base:$document" > "$RUNNER_TEMP/base.yaml"
+            oasdiff() { docker run --rm -v "$PWD:/w" -v "$RUNNER_TEMP:/base" -w /w tufin/oasdiff:v1.35.0 breaking /base/base.yaml "$document" "$@"; }
+            if [ "$PASSTHROUGH" = true ]; then
+              echo "api-passthrough: the breaks in $document below are accepted with this pull request."
+              oasdiff
+            else
+              oasdiff --fail-on ERR || failed=1
+            fi
+          done
+          exit $failed

@@ -49,21 +49,24 @@ passed on.
 
 ## A handler test
 
-The real handler with a stand-in controller, through Gin:
+The real handler with a stand-in controller, through Gin. `openapitest.Engine(t)` is `gin.New()`
+that also checks every response against the service's committed `openapi.yaml`, errors included,
+so a body the contract does not allow fails the test:
 
 ```go
-gin.SetMode(gin.TestMode)
-r := gin.New()
+r := openapitest.Engine(t)
 r.POST("/orders", orderhttp.New(controller{order: &model.Order{ID: 7}}).Place)
 
 w := httptest.NewRecorder()
-r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(`{"customer_id":1,"items":[{"sku":"a"}]}`)))
+r.ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(`{"customer_id":1,"skus":["a"]}`)))
 
 assert.Equal(t, http.StatusCreated, w.Code)
 assert.JSONEq(t, `{"data":{"order":{"id":7}}}`, w.Body.String())
 ```
 
-Assert the whole body with `JSONEq`. A handler test that starts failing means the response changed
+A test that calls a handler method directly takes its context from `openapitest.Context(t, w)`
+instead of `gin.CreateTestContext`, and is checked the same way. Assert the whole body with
+`JSONEq`. A handler test that starts failing means the response changed
 shape: find out why before touching the expectation. `api/internal/handler/health/http` has one to
 copy.
 
@@ -77,4 +80,5 @@ sends, and that each error status becomes the right `APIError` code.
 - [ ] Every test file is `package <pkg>_test`
 - [ ] No test reaches the network or calls `os.Setenv`
 - [ ] Each behaviour's cases are one table
+- [ ] Handler tests serve through `openapitest`, never a bare `gin.New()`
 - [ ] `go test ./...` passes

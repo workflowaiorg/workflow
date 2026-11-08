@@ -164,3 +164,48 @@ func TestGitHubJobsAreTheGateSteps(t *testing.T) {
 		t.Errorf("%s is no gate step of a component", name)
 	}
 }
+
+// TestBothTemplatesCheckBreakingChanges checks that the GitLab template and the GitHub workflow
+// both have the breaking-change job, with the same oasdiff, and both let api-passthrough through.
+// The job is named for the contract, not the backend, as it is no gate step: it needs the labels
+// only CI knows.
+func TestBothTemplatesCheckBreakingChanges(t *testing.T) {
+	var gitlab map[string]struct {
+		// A string for most jobs; {name, entrypoint} for an image whose entrypoint is not a shell.
+		Image  any      `yaml:"image"`
+		Script []string `yaml:"script"`
+	}
+	readYAML(t, "gitlab-ci.yml", &gitlab)
+	var github struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	readYAML(t, "../.github/workflows/wf.yml", &github)
+
+	job, ok := gitlab["openapi:breaking"]
+	if !ok {
+		t.Fatal("the GitLab template has no openapi:breaking job")
+	}
+	fields, _ := job.Image.(map[string]any)
+	image, _ := fields["name"].(string)
+	if !strings.HasPrefix(image, "tufin/oasdiff:v") {
+		t.Fatalf("openapi:breaking runs %q, want a pinned tufin/oasdiff", image)
+	}
+	var githubScript string
+	for _, step := range github.Jobs["openapi-breaking"].Steps {
+		githubScript += step.Run
+	}
+	for name, script := range map[string]string{"GitLab's openapi:breaking": strings.Join(job.Script, "\n"), "GitHub's openapi-breaking": githubScript} {
+		for _, want := range []string{"api-passthrough", "*/openapi.yaml", "--fail-on ERR"} {
+			if !strings.Contains(script, want) {
+				t.Errorf("%s does not hold %q", name, want)
+			}
+		}
+	}
+	if !strings.Contains(githubScript, image) {
+		t.Errorf("GitHub's openapi-breaking does not run %s, as GitLab's does", image)
+	}
+}

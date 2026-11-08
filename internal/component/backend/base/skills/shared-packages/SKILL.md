@@ -40,6 +40,17 @@ functions.
 | `Success(c, data)`, `Created(c, data)` | answer 200 or 201 with `{"data": …}` |
 | `RespondWithError(c, err)` | answer `{"error": {"code", "message"}}` with the code's status; logs the cause |
 | `BindError(err)` | the `APIError` for a request `ShouldBind*` rejected |
+| `BindQuery(c, &q)` | binds the query into `q` by its `form` tags; a bad value is a 400 |
+| `ParamID(c, "id", "order")` | a positive ID from a path parameter; anything else is a 400 naming it |
+| `SplitList(raw)` | a comma-separated value as its trimmed, non-empty items |
+| `PageQuery`, `ParsePage(c, max)`, `Page.HasMore(returned, total)` | a paged list's `offset` and `limit`; no limit is a full page, one past `max` is a 400 |
+
+## `pkg/openapi`
+
+| | |
+|---|---|
+| `Operation`, `Build(operations)` | a route's description, and the document built from them: the `api-design` skill |
+| `openapitest.Engine(t)`, `openapitest.Context(t, w)` | Gin for a handler test, checking each response against `openapi.yaml`: the `testing` skill |
 
 ## `pkg/middleware`
 

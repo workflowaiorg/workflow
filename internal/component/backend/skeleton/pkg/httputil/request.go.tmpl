@@ -1,0 +1,78 @@
+package httputil
+
+import (
+	"cmp"
+	"strconv"
+	"strings"
+
+	"github.com/gin-gonic/gin"
+
+	"[[ .module ]]/pkg/errors"
+)
+
+// BindQuery binds the query string into q by its `form` tags. A value that does not parse, or
+// breaks a `binding` rule, is a 400 naming the parameter.
+func BindQuery(c *gin.Context, q any) error {
+	if err := c.ShouldBindQuery(q); err != nil {
+		return BindError(err)
+	}
+	return nil
+}
+
+// ParamID reads a positive ID from the path parameter param; what names it in the 400.
+func ParamID(c *gin.Context, param, what string) (int64, error) {
+	id, err := strconv.ParseInt(c.Param(param), 10, 64)
+	if err != nil || id <= 0 {
+		return 0, errors.New(errors.CodeInvalidRequest, "The "+what+" ID is not valid", err)
+	}
+	return id, nil
+}
+
+// SplitList splits a comma-separated value, trimming each item and dropping empty ones. An empty
+// value is nil.
+func SplitList(raw string) []string {
+	var items []string
+	for item := range strings.SplitSeq(raw, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+// PageQuery is the offset and limit a paged list reads from its query. An operation names it as
+// its Query, or embeds it in a query struct of its own.
+type PageQuery struct {
+	Offset int `form:"offset" binding:"min=0" minimum:"0"`
+	Limit  int `form:"limit" binding:"omitempty,min=1" minimum:"1"`
+}
+
+// Page is the part of a list one response holds.
+type Page struct {
+	Offset int
+	Limit  int
+}
+
+// Page is the page q asks for. No limit is a full page; a limit past maxLimit is a 400, so a client
+// never asks for more than one full page.
+func (q PageQuery) Page(maxLimit int) (Page, error) {
+	if q.Limit > maxLimit {
+		return Page{}, errors.New(errors.CodeInvalidRequest, "The limit is at most "+strconv.Itoa(maxLimit), nil)
+	}
+	return Page{Offset: q.Offset, Limit: cmp.Or(q.Limit, maxLimit)}, nil
+}
+
+// ParsePage binds a PageQuery and returns the page it asks for.
+func ParsePage(c *gin.Context, maxLimit int) (Page, error) {
+	var q PageQuery
+	if err := BindQuery(c, &q); err != nil {
+		return Page{}, err
+	}
+	return q.Page(maxLimit)
+}
+
+// HasMore says whether anything comes after this page, given how many items it holds and how many
+// there are in all: a response's has_more.
+func (p Page) HasMore(returned, total int) bool {
+	return p.Offset+returned < total
+}
