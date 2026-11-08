@@ -1,0 +1,73 @@
+// Package postgrestest starts the PostgreSQL a repository's integration tests run against: a
+// container of its own, with every migration in migrations/ applied.
+package postgrestest
+
+import (
+	"context"
+	"database/sql"
+	"os"
+	"path/filepath"
+	"runtime"
+	"testing"
+
+	"github.com/pressly/goose/v3"
+	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/modules/postgres"
+	"github.com/uptrace/bun/driver/pgdriver"
+)
+
+// Image is the PostgreSQL the tests run, the one docker-compose.yaml runs, so the tests meet the
+// database the services do.
+const Image = "postgres:18-alpine"
+
+// Database is a migrated test database: the DSN to open the pool under test with, and a
+// connection of the test's own, to insert and read rows the repository is not asked for.
+type Database struct {
+	DSN string
+	DB  *sql.DB
+}
+
+// Start runs the container and applies the migrations, and stops both when t ends.
+func Start(t testing.TB) Database {
+	t.Helper()
+	// Not t's context: the container outlives the call that starts it, until t's cleanup.
+	ctx := context.Background()
+
+	container, err := postgres.Run(ctx, Image, postgres.BasicWaitStrategies())
+	testcontainers.CleanupContainer(t, container)
+	if err != nil {
+		t.Fatalf("starting postgres: %v", err)
+	}
+	dsn, err := container.ConnectionString(ctx, "sslmode=disable")
+	if err != nil {
+		t.Fatalf("the postgres DSN: %v", err)
+	}
+	db := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+	t.Cleanup(func() { _ = db.Close() })
+
+	dir := root()
+	// The root is found from this file's path, which a build with -trimpath leaves relative: without
+	// this, the migrations would be skipped as if there were none.
+	if _, err := os.Stat(filepath.Join(dir, "go.mod")); err != nil {
+		t.Fatalf("finding the project's root from %s: %v", dir, err)
+	}
+	migrations := filepath.Join(dir, "migrations")
+	// A project with no migration yet has nothing to apply; the stack's migrate service skips it
+	// too.
+	if found, _ := filepath.Glob(filepath.Join(migrations, "*.sql")); len(found) > 0 {
+		provider, err := goose.NewProvider(goose.DialectPostgres, db, os.DirFS(migrations))
+		if err != nil {
+			t.Fatalf("reading the migrations: %v", err)
+		}
+		if _, err := provider.Up(ctx); err != nil {
+			t.Fatalf("applying the migrations: %v", err)
+		}
+	}
+	return Database{DSN: dsn, DB: db}
+}
+
+// root is the project's root, found from this file, so no test counts its own depth.
+func root() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "..", "..")
+}
