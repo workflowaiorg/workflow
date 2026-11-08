@@ -1,6 +1,6 @@
 ---
 name: database
-description: "How a service keeps data in PostgreSQL: the shared pool, repositories with bun, models, transactions, goose migrations and repository tests."
+description: "How a service keeps data in PostgreSQL: the shared pool, repositories with bun, models, transactions with postgres.RunInTx, goose migrations and repository tests with postgrestest."
 ---
 
 # Skill: Database
@@ -20,7 +20,8 @@ through [goose](https://github.com/pressly/goose) migrations.
 
 Each service opens one pool, in `app.New`, with `pkg/postgres.Open(cfg.PostgresDSN)`, and closes
 it after the server stops. It connects on the first query, so the service starts while the
-database is still starting. Every repository gets the pool from the `App`; none opens its own.
+database is still starting. Every repository gets the pool from the `App` and none opens its own,
+so two repositories on one database share one pool.
 
 `Config.PostgresDSN` is built in `Load()` from `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
 `POSTGRES_PASSWORD`, `POSTGRES_DB` and `POSTGRES_SSLMODE`, each defaulting to the local stack's.
@@ -65,12 +66,14 @@ func (r *Repository) GetOrder(ctx context.Context, orderID int64) (*model.Order,
 
 ## Transactions
 
-Writes that must succeed or fail together run in one transaction. `r.db.RunInTx` fits most; use
-`BeginTx` with `defer tx.Rollback()` when a step needs what an earlier one returned, such as a new
-row's ID.
+Writes that must succeed or fail together run in one transaction, through
+`postgres.RunInTx(ctx, r.db, fn)` from `pkg/postgres`, never bun's own `RunInTx` or `BeginTx`. It
+rolls back when `fn` returns an error and commits otherwise. An `APIError` from `fn` comes back as
+it is; any other error, a failed begin or commit among them, is logged and comes back as
+`CodeInternal`. So `fn` returns bun's errors unwrapped, and wraps only what has a code of its own.
 
 ```go
-err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
+err := postgres.RunInTx(ctx, r.db, func(ctx context.Context, tx bun.Tx) error {
     if _, err := tx.NewInsert().Model(order).Exec(ctx); err != nil {
         return err
     }
@@ -81,6 +84,11 @@ err := r.db.RunInTx(ctx, nil, func(ctx context.Context, tx bun.Tx) error {
     return err
 })
 ```
+
+- **A value out of a transaction** is a variable declared before it, which `fn` sets. An insert
+  fills in the model's `id`, as `order.ID` above.
+- **Rolling back without failing**, when `fn` finds there is nothing to do, is
+  `return postgres.ErrRollback`: `RunInTx` rolls back and returns nil.
 
 ## Models
 
@@ -123,18 +131,50 @@ it `depends_on: migrate: condition: service_completed_successfully`, as `api` ha
 
 ## Testing a repository
 
-A repository test runs against a real PostgreSQL in a container, with
-[testcontainers-go](https://golang.testcontainers.org)'s postgres module, and carries the
-`integration` build tag so `go test ./...` stays fast; `go test -tags=integration ./...` runs it.
-It applies the migrations with goose's library, `goose.SetDialect("postgres")` then
-`goose.Up(db.DB, "<path to migrations/>")` (`db.DB` is the `*sql.DB` under bun), inserts
-its own rows, and empties the tables between tests. Those rows never leave the test file.
+A repository test runs against a real PostgreSQL, and carries the `integration` build tag so
+`go test ./...` stays fast and needs no Docker; `go test -tags=integration ./...` runs it.
+
+`postgrestest.Start(t)` from `pkg/postgrestest` starts the database in a container of its own,
+with [testcontainers-go](https://golang.testcontainers.org), applies every migration in
+`migrations/`, and stops it when the test ends. It returns the `DSN`, which the test opens the
+repository's pool with, and `DB`, a `*sql.DB` of the test's own for the rows it inserts and reads
+back. A container takes seconds to start, so the cases of one repository share one: they are
+subtests of the test that started it, and each inserts the rows it needs. Those rows never leave
+the test file.
+
+- **A row takes the ID the database gives it**, read back with `RETURNING id`: an ID written by
+  hand leaves the sequence behind, and the repository's next insert collides with it.
+- **A case checks only the rows it inserted**, by their IDs or a value of its own, since the rows
+  of the cases before it are still there. A list or count query gets a test of its own, with its
+  own `Start`.
+
+```go
+//go:build integration
+
+func TestOrders(t *testing.T) {
+    database := postgrestest.Start(t)
+    db := postgres.Open(database.DSN)
+    t.Cleanup(func() { _ = db.Close() })
+    repository := orderpg.New(db)
+
+    t.Run("an order is found by its ID", func(t *testing.T) {
+        ctx := t.Context()
+        var orderID int64
+        err := database.DB.QueryRowContext(ctx, "INSERT INTO orders (customer) VALUES ('Ann') RETURNING id").Scan(&orderID)
+        require.NoError(t, err)
+
+        order, err := repository.GetOrder(ctx, orderID)
+        require.NoError(t, err)
+        assert.Equal(t, "Ann", order.Customer)
+    })
+}
+```
 
 ## Definition of done
 
 - [ ] Repositories take the `App`'s pool; none opens a connection of its own
 - [ ] `sql.ErrNoRows` is `CodeNotFound`; every other error is a logged `CodeInternal`
-- [ ] Writes that belong together run in one transaction
+- [ ] Writes that belong together run in one `postgres.RunInTx`
 - [ ] Models embed `bun.BaseModel` with a table and alias; nullable columns are pointers
 - [ ] A schema change is a new migration; no applied migration was edited; no data in migrations
 - [ ] A new query has a repository test

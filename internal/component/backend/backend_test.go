@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -136,9 +137,10 @@ func TestTheModuleIsChecked(t *testing.T) {
 func TestPostgresExistsOnlyWhenChosen(t *testing.T) {
 	for _, postgres := range []bool{false, true} {
 		dir := written(t, options{postgres: postgres})
-		_, err := os.Stat(filepath.Join(dir, "pkg/postgres/postgres.go"))
-		if (err == nil) != postgres {
-			t.Errorf("with postgres %v, pkg/postgres exists = %v", postgres, err == nil)
+		for _, name := range []string{"pkg/postgres/postgres.go", "pkg/postgrestest/postgrestest.go"} {
+			if _, err := os.Stat(filepath.Join(dir, name)); (err == nil) != postgres {
+				t.Errorf("with postgres %v, %s exists = %v", postgres, name, err == nil)
+			}
 		}
 		// What each file holds of the database, when it is chosen.
 		marks := map[string]string{
@@ -146,6 +148,7 @@ func TestPostgresExistsOnlyWhenChosen(t *testing.T) {
 			"api/internal/app/app.go":       "postgres.Open",
 			"api/internal/config/config.go": "PostgresDSN",
 			"api/cmd/http/main.go":          "DB.Close",
+			"go.mod":                        "testcontainers-go",
 		}
 		for name, mark := range marks {
 			content, err := os.ReadFile(filepath.Join(dir, name))
@@ -156,6 +159,25 @@ func TestPostgresExistsOnlyWhenChosen(t *testing.T) {
 				t.Errorf("with postgres %v, %s holds %s = %v:\n%s", postgres, name, mark, got, content)
 			}
 		}
+	}
+}
+
+func TestTheTestsRunThePostgresTheStackRuns(t *testing.T) {
+	dir := written(t, options{postgres: true})
+	helper, err := os.ReadFile(filepath.Join(dir, "pkg/postgrestest/postgrestest.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	compose, err := os.ReadFile(filepath.Join(dir, "docker-compose.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	image := regexp.MustCompile(`const Image = "([^"]+)"`).FindSubmatch(helper)
+	if image == nil {
+		t.Fatalf("pkg/postgrestest names no Image:\n%s", helper)
+	}
+	if want := "    image: " + string(image[1]) + "\n"; !strings.Contains(string(compose), want) {
+		t.Errorf("docker-compose.yaml does not run %s, the image the tests run:\n%s", image[1], compose)
 	}
 }
 

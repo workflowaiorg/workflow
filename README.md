@@ -429,13 +429,17 @@ backend: what you do not choose is not written at all. With it, the backend also
 
 | What | Where |
 |---|---|
-| the pool every service opens once, through [bun](https://bun.uptrace.dev) | `pkg/postgres/` |
+| the pool every service opens once, through [bun](https://bun.uptrace.dev), and `RunInTx`, which runs a transaction and turns its errors into the backend's | `pkg/postgres/` |
+| `Start`, which gives a repository's test a database of its own, in a container, with every migration applied | `pkg/postgrestest/` |
 | the database's settings, `POSTGRES_*`, defaulting to the local stack's, and the pool on the `App` | `api/internal/config/`, `api/internal/app/` |
 | a `postgres` service, and a `migrate` service that applies the [goose](https://github.com/pressly/goose) migrations in `migrations/` before any service starts | `docker-compose.yaml` |
 | the `database` skill, and a database section in `AGENTS.md` | `.agents/base/` |
 
 `docker compose up -d` applies new migrations each time. `docker compose logs migrate` shows what it
 applied.
+
+The tests that need a database carry the `integration` build tag, so `go test ./...` runs without
+Docker. With Docker running, `go test -tags=integration ./...` runs them too.
 
 #### With a queue
 

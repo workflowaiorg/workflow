@@ -5,16 +5,39 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+	"github.com/uptrace/bun"
+
+	"[[ .module ]]/pkg/errors"
 	"[[ .module ]]/pkg/postgres"
 )
 
-func TestOpenLeavesConnectingToTheFirstQuery(t *testing.T) {
-	db := postgres.Open("postgres://app:app@127.0.0.1:1/app?sslmode=disable")
-	defer db.Close()
+// unreachable is a database on a port nothing listens on.
+const unreachable = "postgres://app:app@127.0.0.1:1/app?sslmode=disable"
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+func TestOpenLeavesConnectingToTheFirstQuery(t *testing.T) {
+	db := postgres.Open(unreachable)
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	if err := db.PingContext(ctx); err == nil {
-		t.Error("Ping to a port nothing listens on succeeded, though Open returned a pool")
-	}
+	assert.Error(t, db.PingContext(ctx), "Ping to a port nothing listens on succeeded, though Open returned a pool")
+}
+
+func TestRunInTxTurnsAFailedBeginIntoAnInternalError(t *testing.T) {
+	db := postgres.Open(unreachable)
+	t.Cleanup(func() { _ = db.Close() })
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	ran := false
+	err := postgres.RunInTx(ctx, db, func(context.Context, bun.Tx) error {
+		ran = true
+		return nil
+	})
+	var apiErr *errors.APIError
+	require.ErrorAs(t, err, &apiErr)
+	assert.Equal(t, errors.CodeInternal, apiErr.Code)
+	assert.False(t, ran, "fn ran though the transaction never began")
 }

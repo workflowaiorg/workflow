@@ -305,14 +305,15 @@ func TestAProjectWithTheBackendBuildsAndPasses(t *testing.T) {
 			// The project's own Go version, as CI has it: a module that needs a newer Go fails here
 			// rather than upgrading the toolchain unseen.
 			t.Setenv("GOTOOLCHAIN", "local")
-			for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"test", "./..."}} {
+			// vet with the integration tag too, so the tests that need Docker at least build.
+			for _, args := range [][]string{{"mod", "tidy"}, {"vet", "./..."}, {"vet", "-tags=integration", "./..."}, {"test", "./..."}} {
 				command := exec.Command("go", args...)
 				command.Dir = dir
 				if out, err := command.CombinedOutput(); err != nil {
 					t.Fatalf("go %s: %v\n%s", strings.Join(args, " "), err, out)
 				}
 			}
-			for _, module := range []string{"github.com/uptrace/bun", "github.com/redis/go-redis/v9", "github.com/a2aproject/a2a-go/v2", "github.com/openai/openai-go/v3"} {
+			for _, module := range []string{"github.com/uptrace/bun", "github.com/testcontainers/testcontainers-go", "github.com/redis/go-redis/v9", "github.com/a2aproject/a2a-go/v2", "github.com/openai/openai-go/v3"} {
 				if got := strings.Contains(read(t, dir, "go.mod"), module); got != every {
 					t.Errorf("with every option %v, go.mod requires %s = %v", every, module, got)
 				}

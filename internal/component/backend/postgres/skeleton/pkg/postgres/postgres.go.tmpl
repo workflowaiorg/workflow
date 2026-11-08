@@ -1,16 +1,41 @@
-// Package postgres opens a service's pool of connections to PostgreSQL, through bun.
+// Package postgres opens a service's pool of connections to PostgreSQL, through bun, and runs
+// transactions on it.
 package postgres
 
 import (
+	"context"
 	"database/sql"
 
 	"github.com/uptrace/bun"
 	"github.com/uptrace/bun/dialect/pgdialect"
 	"github.com/uptrace/bun/driver/pgdriver"
+
+	"[[ .module ]]/pkg/errors"
+	"[[ .module ]]/pkg/logging"
 )
 
 // Open returns a pool of connections to the database at dsn. It connects on the first query, not
 // here, so a service starts even while its database is still starting.
 func Open(dsn string) *bun.DB {
 	return bun.NewDB(sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn))), pgdialect.New())
+}
+
+// ErrRollback, returned by a transaction's fn, rolls the transaction back and makes RunInTx return
+// nil.
+var ErrRollback = errors.New(errors.CodeInternal, "rolled back on purpose", nil)
+
+// RunInTx runs fn in a transaction, rolled back when fn fails and committed otherwise. An APIError
+// comes back as it is; any other error, a failed begin or commit among them, is logged and comes
+// back as CodeInternal, so no driver error leaves a repository.
+func RunInTx(ctx context.Context, db *bun.DB, fn func(ctx context.Context, tx bun.Tx) error) error {
+	err := db.RunInTx(ctx, nil, fn)
+	var apiErr *errors.APIError
+	switch {
+	case err == nil, errors.Is(err, ErrRollback):
+		return nil
+	case errors.As(err, &apiErr):
+		return err
+	}
+	logging.Error(ctx, "running a transaction", "error", err)
+	return errors.New(errors.CodeInternal, "Could not complete the change", err)
 }
