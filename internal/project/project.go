@@ -46,6 +46,11 @@ func UserErrorf(format string, args ...any) error {
 	return &UserError{message: fmt.Sprintf(format, args...)}
 }
 
+// AsUserError returns err as a UserError, saying what it says.
+func AsUserError(err error) error {
+	return &UserError{message: err.Error(), err: err}
+}
+
 // Config is a project's .wf.yml.
 type Config struct {
 	// WF is the version of wf the project pins.
@@ -439,4 +444,25 @@ func ReadText(file string) ([]byte, error) {
 	content, err := os.ReadFile(file)
 	content = bytes.TrimPrefix(content, []byte("\xef\xbb\xbf"))
 	return bytes.ReplaceAll(content, []byte("\r\n"), []byte("\n")), err
+}
+
+// WriteAtomically writes data to file through a temporary file renamed into place, so a failure
+// leaves the old file whole.
+func WriteAtomically(file string, data []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(file), ".wf-*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	if _, err := temp.Write(data); err != nil {
+		temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(temp.Name(), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), file)
 }

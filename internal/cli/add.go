@@ -1,9 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
-	"os"
+	"io/fs"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -92,13 +93,19 @@ func runAdd(app *App, args []string) error {
 	if err != nil {
 		return err
 	}
+	// Rendered before anything is written: a template that fails would otherwise leave the base
+	// installed for a component .wf.yml does not list.
+	skeleton, err := base.RenderComponentSkeleton(c, answers)
+	if err != nil {
+		return err
+	}
 	installed = append(installed, c)
 	slices.SortFunc(installed, func(a, b component.Component) int { return strings.Compare(a.Name, b.Name) })
 	if err := base.Install(app.dir, config.Forge, installed); err != nil {
 		return err
 	}
 	fmt.Fprintln(app.stdout, "wrote    "+project.BaseDir+"/")
-	written, err := base.ComponentSkeleton(app.dir, c, answers)
+	written, err := base.WriteSkeleton(app.dir, skeleton)
 	if err != nil {
 		return err
 	}
@@ -106,7 +113,7 @@ func runAdd(app *App, args []string) error {
 		fmt.Fprintln(app.stdout, "wrote    "+path+" (the project's from now on)")
 	}
 	// .wf.yml is written after the base, so an add that failed before it can be run again.
-	if err := os.WriteFile(filepath.Join(app.dir, project.ConfigFile), configFile, 0o644); err != nil {
+	if err := project.WriteAtomically(filepath.Join(app.dir, project.ConfigFile), configFile); err != nil {
 		return fmt.Errorf("writing %s: %w", project.ConfigFile, err)
 	}
 	fmt.Fprintln(app.stdout, "wrote    "+project.ConfigFile)
@@ -159,11 +166,16 @@ func (app *App) listComponents() error {
 		_, err := fmt.Fprintln(app.stdout, "wf carries no components yet.")
 		return err
 	}
-	config, _ := project.Load(app.dir)
+	// Before wf init there is no .wf.yml and nothing is installed; a broken one is reported, not
+	// read as nothing installed.
+	_, installed, err := app.load()
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
 	table := tabwriter.NewWriter(app.stdout, 0, 0, 3, ' ', 0)
 	for _, c := range app.components {
 		state := ""
-		if _, ok := config.Components[c.Name]; ok {
+		if slices.ContainsFunc(installed, func(i component.Component) bool { return i.Name == c.Name }) {
 			state = "(installed)"
 		}
 		fmt.Fprintf(table, "  %s\t%s\t%s\n", c.Name, c.Summary, state)

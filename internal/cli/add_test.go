@@ -190,6 +190,31 @@ func TestAddRefusesAComponentWhosePartIsTaken(t *testing.T) {
 	}
 }
 
+func TestAddWritesNothingWhenATemplateFails(t *testing.T) {
+	dir := initialised(t)
+	broken := sample
+	broken.Name = "broken"
+	broken.Options = nil
+	broken.Skeleton = fstest.MapFS{
+		"broken/a.txt":      {Data: []byte("written first\n")},
+		"broken/b.txt.tmpl": {Data: []byte("[[ .missing ]]\n")},
+	}
+	app := cli.New("0.1.0", dir, strings.NewReader(""), new(bytes.Buffer), new(bytes.Buffer))
+	app.SetComponents(broken)
+	config := read(t, dir, ".wf.yml")
+	if code, _, stderr := runWith(t, app, "add", "broken"); code != 1 || !strings.Contains(stderr, "b.txt.tmpl") {
+		t.Errorf("wf add broken = (%d, %q), want a failure naming the template", code, stderr)
+	}
+	if read(t, dir, ".wf.yml") != config {
+		t.Error("a wf add that failed changed .wf.yml")
+	}
+	for _, path := range []string{".agents/base/skills/sample", "broken/a.txt"} {
+		if _, err := os.Stat(filepath.Join(dir, path)); err == nil {
+			t.Errorf("a wf add whose template failed wrote %s", path)
+		}
+	}
+}
+
 func TestAddRefusesComponentsItCannotAddTo(t *testing.T) {
 	dir := initialised(t)
 	config := read(t, dir, ".wf.yml") + "saved: &installed {}\ncomponents: *installed\n"
@@ -216,7 +241,13 @@ func TestComponentNamesAreChecked(t *testing.T) {
 	if code, stdout, _ := runSample(t, dir, "add"); code != 0 || !strings.Contains(stdout, "sample") {
 		t.Errorf("wf add alone = (%d, %q), want the components listed", code, stdout)
 	}
+	if code, stdout, _ := runSample(t, t.TempDir(), "add"); code != 0 || !strings.Contains(stdout, "sample") {
+		t.Errorf("wf add alone before wf init = (%d, %q), want the components listed", code, stdout)
+	}
 	appendFile(t, filepath.Join(dir, ".wf.yml"), "components:\n  nothing: {}\n")
+	if code, stdout, stderr := runSample(t, dir, "add"); code != 2 || !strings.Contains(stderr, "components.nothing") {
+		t.Errorf("wf add alone with a broken %s = (%d, %q, %q), want exit 2 naming the problem", project.ConfigFile, code, stdout, stderr)
+	}
 	if code, _, stderr := runSample(t, dir, "sync"); code != 2 || !strings.Contains(stderr, "components.nothing is not a component wf knows") {
 		t.Errorf("wf sync with an unknown component = (%d, %q), want exit 2 naming it", code, stderr)
 	}

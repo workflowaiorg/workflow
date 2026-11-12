@@ -162,6 +162,23 @@ func TestSyncThenCheck(t *testing.T) {
 	}
 }
 
+func TestSyncExitsTwoOnAMistakeInTheProjectsPart(t *testing.T) {
+	dir := t.TempDir()
+	if code, _, stderr := runIn(t, dir, "init", "--forge=gitlab"); code != 0 {
+		t.Fatalf("wf init exited %d: %s", code, stderr)
+	}
+	subagent := filepath.Join(dir, ".agents/project/subagents/auditor.md")
+	if err := os.MkdirAll(filepath.Dir(subagent), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(subagent, []byte("---\ndescription: [Audits\n---\nAudit.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runIn(t, dir, "sync"); code != 2 || !strings.Contains(stderr, "subagents/auditor.md") {
+		t.Errorf("wf sync with broken frontmatter in a project subagent = (%d, %q), want exit 2 naming the file", code, stderr)
+	}
+}
+
 func TestSyncLeavesFilesItDidNotWriteUntilForced(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.CopyFS(dir, os.DirFS("../render/testdata/sync/project")); err != nil {

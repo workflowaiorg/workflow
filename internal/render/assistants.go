@@ -5,11 +5,24 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"github.com/workflowaiorg/workflow/internal/project"
 )
 
 // files returns what src generates for every assistant: Claude Code (.claude), GitHub Copilot
 // (.github) and opencode (.opencode). Each reads only its own folder.
+//
+// wf's tests render every base part alone, so when a source the project has a part of fails, that
+// part is the mistake.
 func (src source) files(header string) ([]File, error) {
+	files, err := src.generate(header)
+	if err != nil && src.project != nil {
+		return nil, project.AsUserError(err)
+	}
+	return files, err
+}
+
+func (src source) generate(header string) ([]File, error) {
 	where := src.where()
 	doc, err := merge(where, src.base, src.project)
 	if err != nil {

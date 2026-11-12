@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"maps"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -120,7 +119,7 @@ func (l *Launcher) Lock() (LockResult, error) {
 	if !result.Changed {
 		return result, nil
 	}
-	if err := writeAtomically(filepath.Join(l.Dir, project.SumFile), next.encode()); err != nil {
+	if err := project.WriteAtomically(filepath.Join(l.Dir, project.SumFile), next.encode()); err != nil {
 		return LockResult{}, fmt.Errorf("writing %s: %w", project.SumFile, err)
 	}
 	return result, nil
@@ -166,25 +165,4 @@ func (l *Launcher) checksums(version string) (sums, error) {
 func digest(data []byte) string {
 	sum := sha256.Sum256(data)
 	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-// writeAtomically writes data to file through a temporary file renamed into place, so a failure
-// leaves the old file whole.
-func writeAtomically(file string, data []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(file), ".wf-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(temp.Name())
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(temp.Name(), 0o644); err != nil {
-		return err
-	}
-	return os.Rename(temp.Name(), file)
 }

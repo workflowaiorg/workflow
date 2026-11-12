@@ -156,3 +156,39 @@ func TestLoadRefusesComponentsThatAreNotAMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestWriteAtomically(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, project.ConfigFile)
+	if err := os.WriteFile(file, []byte("old\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := project.WriteAtomically(file, []byte("new\n")); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(file); err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("Stat = %v, %v; want mode 0644", info, err)
+	}
+	if content, _ := os.ReadFile(file); string(content) != "new\n" {
+		t.Errorf("content = %q, want the new one", content)
+	}
+
+	// A target the rename cannot replace: the write fails and the target is left as it was.
+	target := filepath.Join(dir, "taken")
+	if err := os.MkdirAll(filepath.Join(target, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := project.WriteAtomically(target, []byte("new\n")); err == nil {
+		t.Error("WriteAtomically over a directory = nil, want an error")
+	}
+	if _, err := os.Stat(filepath.Join(target, "inside")); err != nil {
+		t.Errorf("the directory written over lost its content: %v", err)
+	}
+
+	entries, _ := os.ReadDir(dir)
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".wf-") {
+			t.Errorf("left %s behind", entry.Name())
+		}
+	}
+}

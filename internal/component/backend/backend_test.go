@@ -37,7 +37,11 @@ func written(t *testing.T, chosen options) string {
 	answers := map[string]any{
 		"module": "example.com/shop", "postgres": chosen.postgres, "queue": chosen.queue, "llm-agents": chosen.agents,
 	}
-	if _, err := base.ComponentSkeleton(dir, backend.Component, answers); err != nil {
+	rendered, err := base.RenderComponentSkeleton(backend.Component, answers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := base.WriteSkeleton(dir, rendered); err != nil {
 		t.Fatal(err)
 	}
 	return dir
