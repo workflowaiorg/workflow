@@ -44,6 +44,12 @@ var sample = component.Component{
 	Edits: func(answers map[string]any) []string {
 		return []string{"add /sample/cache to .gitignore"}
 	},
+	Existing: func(path string, content []byte) string {
+		if path == "sample/config.txt" {
+			return fmt.Sprintf("it lacks %q", content)
+		}
+		return ""
+	},
 }
 
 // runSample runs wf on the project at dir, offering the sample component.
@@ -121,6 +127,33 @@ func TestAddInstallsEveryPartOfAComponent(t *testing.T) {
 	}
 }
 
+func TestAddSaysWhichFilesItLeftAlone(t *testing.T) {
+	dir := initialised(t)
+	for _, name := range []string{"sample/config.txt", "sample/protos.txt"} {
+		if err := os.MkdirAll(filepath.Join(dir, "sample"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("mine\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, stdout, stderr := runSample(t, dir, "add", "sample", "--db=sqlite", "--grpc")
+	if code != 0 {
+		t.Fatalf("wf add sample = (%d, %q)", code, stderr)
+	}
+	for _, want := range []string{
+		"by hand  sample/config.txt was there already, so wf left it alone: it lacks \"the project's own\\n\"\n",
+		"by hand  sample/protos.txt was there already, so wf left it alone\n",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("wf add printed %q, want %q", stderr, want)
+		}
+	}
+	if strings.Contains(stdout, "wrote    sample/") || read(t, dir, "sample/config.txt") != "mine\n" {
+		t.Errorf("wf add wrote over a file of the project's: %q", stdout)
+	}
+}
+
 func TestAnOptionAnsweredNoBringsNothing(t *testing.T) {
 	dir := initialised(t)
 	if code, _, stderr := runSample(t, dir, "add", "sample", "--db=sqlite", "--grpc=false"); code != 0 {
@@ -154,6 +187,9 @@ func TestAddAsksWhatNoFlagSays(t *testing.T) {
 	dir := initialised(t)
 	if code, _, stderr := runSample(t, dir, "add", "sample", "--grpc"); code != 2 || !strings.Contains(stderr, "pass --db") {
 		t.Errorf("wf add with no terminal = (%d, %q), want exit 2 naming --db", code, stderr)
+	}
+	if code, _, stderr := runSample(t, dir, "add", "sample", "--db=sqlite"); code != 2 || !strings.Contains(stderr, "pass --grpc for yes or --grpc=false for no") {
+		t.Errorf("wf add with no terminal = (%d, %q), want exit 2 naming both answers to --grpc", code, stderr)
 	}
 	if strings.Contains(read(t, dir, ".wf.yml"), "components:") {
 		t.Error("a wf add that asked nothing recorded the component")
@@ -288,7 +324,7 @@ func TestAnswersEditedByHandAreChecked(t *testing.T) {
 
 func TestAddListsAComponentsOptions(t *testing.T) {
 	code, stdout, _ := runSample(t, t.TempDir(), "add", "sample", "-h")
-	for _, want := range []string{"usage: wf add sample", "--db=<answer>", "postgres, sqlite; default postgres", "--grpc", "yes or no; default false"} {
+	for _, want := range []string{"usage: wf add sample", "--db=<answer>", "postgres, sqlite; default postgres", "--grpc[=false]", "yes or no; default false"} {
 		if code != 0 || !strings.Contains(stdout, want) {
 			t.Errorf("wf add sample -h = (%d, %q), want it to say %q", code, stdout, want)
 		}

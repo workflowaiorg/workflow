@@ -203,9 +203,17 @@ wf show workflow --base   # wf's part alone
 ```
 
 **A skill, command or subagent of your own** is a file in `.agents/project/` with no base part,
-such as `.agents/project/skills/deploy/SKILL.md`. It needs a `description` in its frontmatter, the
-line an assistant reads to decide when to use it. `wf sync` copies it to every assistant like the
-others.
+such as `.agents/project/skills/deploy/SKILL.md`. Its frontmatter needs a `description`, the line
+an assistant reads to decide when to use it. A skill's also needs a `name`, the same as its folder:
+
+```markdown
+---
+name: deploy
+description: How this project is deployed
+---
+```
+
+`wf sync` copies it to every assistant like the others.
 
 **Frontmatter.** A part may start with YAML frontmatter between `---` lines. Your keys replace wf's
 keys, one by one. For example, you can change a skill's `description` and keep everything else. A
@@ -265,7 +273,7 @@ wf comes with CI templates for GitLab and for GitHub Actions. Both run the same 
 |---|---|---|
 | wf sync | `wf sync --check` | every pipeline |
 | wf spec-coverage | `wf spec-coverage` | every pipeline |
-| backend go-format | `test -z "$(gofmt -l .)"` | the project has `go.mod`, and a `.go` file changed |
+| backend go-format | `gofmt -l .; test -z "$(gofmt -l .)"` | the project has `go.mod`, and a `.go` file changed |
 | backend go-vet | `go vet ./...` | the project has `go.mod`, and a `.go` file, `go.mod` or `go.sum` changed |
 | backend go-test | `go test ./...` | the same, or an `openapi.yaml` changed |
 | openapi breaking | `oasdiff breaking`, each `<service>/openapi.yaml` against the target branch's | in a merge request or pull request, the project has `go.mod`, and an `openapi.yaml` changed |
@@ -321,6 +329,25 @@ backend:go-test:
 
 If your `.gitlab-ci.yml` lists its `stages:`, include `test` among them.
 
+wf's jobs run in merge request pipelines as well as branch ones, so without `workflow:` rules of
+your own, a push to a branch with an open merge request starts two pipelines. GitLab's usual rules
+keep the merge request's alone:
+
+```yaml
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_TAG
+```
+
+They apply to your own jobs too. A job with no `rules:`, or one whose rules test
+`$CI_COMMIT_BRANCH`, never runs in a merge request pipeline, so once a merge request is open it
+would stop running for its branch. Give such a job a rule that matches there, such as
+`rules: [{when: on_success}]`, first.
+
 ### On GitHub
 
 Call wf's workflow from one of your own, such as `.github/workflows/ci.yml`, pinned to the commit
@@ -367,7 +394,8 @@ wf add <component>        # add one; wf asks what it needs to know
 ```
 
 Every question is also a flag, so a script or an agent passes the answer instead of being asked.
-`wf add` then:
+A yes-or-no one is `--postgres` for yes and `--postgres=false` for no; with no terminal to ask on,
+leaving one out fails. `wf add` then:
 
 1. puts the component's part of the base into `.agents/base`;
 2. writes the files it gives a project once (yours from then on, like the decisions index);
@@ -376,7 +404,9 @@ Every question is also a flag, so a script or an agent passes the answer instead
 4. runs `wf sync`.
 
 When the component needs a change in a file your project owns, such as `.gitignore`, wf prints it on
-a `by hand` line and leaves the change to you. Commit what `wf add` wrote, as after `wf init`.
+a `by hand` line and leaves the change to you. So it does when a file it gives a project is there
+already: it leaves yours alone, and says what yours may lack. Commit what `wf add` wrote, as after
+`wf init`.
 
 `wf add` lists the components your version carries. The frontend comes next.
 
@@ -402,9 +432,11 @@ curl http://localhost:8000/health
 | `api`'s HTTP contract, generated from its Go types, and the command that writes it | `api/openapi.yaml`, `api/cmd/openapi/` |
 | the local stack, building each service from its source as it starts | `docker-compose.yaml` |
 
-If one of them exists already, wf leaves it alone. With your own `docker-compose.yaml`, add the
-`api` service to it by hand. In a project that has a `go.mod`, `--module` must be the module it
-names.
+If one of them exists already, wf leaves it alone and prints a `by hand` line for it. For your own
+`docker-compose.yaml`, the line names the services and volumes to add to it. For your own `go.mod`, it names
+the module versions the new code was written for: `go get` those it lacks before `go mod tidy`,
+which would otherwise take the newest. In a project that has a `go.mod`, `--module` must be the
+module it names.
 
 **The HTTP contract.** Each public route has an operation in its handler package's `openapi.go`,
 and `go run ./api/cmd/openapi` writes `api/openapi.yaml` from them. Commit the file; never edit it
@@ -700,8 +732,8 @@ on.
 
 ### `wf version`, `wf help [--json]`
 
-`wf version` prints the version. `wf help` lists the commands, those of the installed components
-included. `--json` gives the list in a form an agent can read.
+`wf version` prints the version. `wf help` lists the commands. `--json` gives the list in a form
+an agent can read.
 
 ### Exit codes
 
@@ -783,7 +815,6 @@ What wf installs:
 | `.wf.yml: worktree.copy …`, `worktree.skip …` | Make it a list of globs, such as `[".env*"]`, and check each pattern |
 | `.wf.yml: components.<name> is not a component wf knows` | Run the wf version that added it: `.wf.yml` pins it |
 | `<component> and another part of the base both have <file>` | Two components clash; add only one of them, and report it |
-| `the <component> component is not installed` | Run `wf add <component>` |
 | `.wf.yml: components.<name>.<option> …` | Give that answer one the component accepts, as `wf add <name> -h` lists |
 | `… is installed already` | Change its answers under `components:` in `.wf.yml`, then run `wf sync` |
 | `wf add can only add to components: written out in full` | `components:` comes from a YAML alias (`*name`) or a merge key (`<<:`). Write the components out under `components:` itself, then run `wf add` again |

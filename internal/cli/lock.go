@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 
-	"github.com/workflowaiorg/workflow/internal/launcher"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -16,9 +15,7 @@ func runLock(app *App, args []string) error {
 	if flags.NArg() > 0 {
 		return fmt.Errorf("%w: takes no arguments", errUsage)
 	}
-	l := launcher.New(app.version, app.dir)
-	l.ReleasesURL = app.releases
-	result, err := l.Lock()
+	result, err := app.launcher().Lock()
 	if err != nil {
 		return err
 	}

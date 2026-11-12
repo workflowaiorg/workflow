@@ -55,7 +55,7 @@ func runInit(app *App, args []string) error {
 	}
 
 	if *forge == "" {
-		answer, err := app.ask("Which forge do this project's Issues live on ("+strings.Join(project.Forges, ", ")+")", project.Forges[0], "forge")
+		answer, err := app.ask("Which forge do this project's Issues live on ("+strings.Join(project.Forges, ", ")+")", project.Forges[0], "--forge")
 		if err != nil {
 			return err
 		}

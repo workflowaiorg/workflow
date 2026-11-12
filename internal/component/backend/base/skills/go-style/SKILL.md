@@ -92,8 +92,8 @@ another one.
 
 In the change that raises the `go` line in `go.mod`:
 
-1. Raise the `golang:` image tag in `docker-compose.yaml` with it. The image does not download a
-   newer Go, so a `go` line above its version stops the stack from starting.
+1. Raise the `golang:` image tag in `docker-compose.yaml` with it. The stack starts without it,
+   since `GOTOOLCHAIN: auto` lets the image fetch the newer Go, but only after downloading it.
 2. Move the rows the new version unlocks into the first table.
 3. Compare upstream's latest release against the pin above, and add its new rules.
 

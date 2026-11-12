@@ -68,13 +68,14 @@ func runAdd(app *App, args []string) error {
 	for _, option := range c.Options {
 		text, ok := given[option.Name]
 		if !ok {
-			question := option.Question
+			question, flags := option.Question, "--"+option.Name
 			if option.Bool {
 				question += " (yes or no)"
+				flags += " for yes or --" + option.Name + "=false for no"
 			} else if len(option.Choices) > 0 {
 				question += " (" + strings.Join(option.Choices, ", ") + ")"
 			}
-			if text, err = app.ask(question, option.Default, option.Name); err != nil {
+			if text, err = app.ask(question, option.Default, flags); err != nil {
 				return err
 			}
 		}
@@ -105,7 +106,7 @@ func runAdd(app *App, args []string) error {
 		return err
 	}
 	fmt.Fprintln(app.stdout, "wrote    "+project.BaseDir+"/")
-	written, err := base.WriteSkeleton(app.dir, skeleton)
+	written, existing, err := base.WriteSkeleton(app.dir, skeleton)
 	if err != nil {
 		return err
 	}
@@ -124,6 +125,15 @@ func runAdd(app *App, args []string) error {
 	report, syncErr := render.Sync(app.dir, config, installed, app.version, *force)
 	err = app.reportSync(report, syncErr)
 	// What the project owns is the developer's to change, so wf says what to change instead.
+	for _, path := range existing {
+		line := path + " was there already, so wf left it alone"
+		if c.Existing != nil {
+			if hint := c.Existing(path, skeleton[path]); hint != "" {
+				line += ": " + hint
+			}
+		}
+		fmt.Fprintln(app.stderr, "by hand  "+line)
+	}
 	if c.Edits != nil {
 		for _, edit := range c.Edits(answers) {
 			fmt.Fprintln(app.stderr, "by hand  "+edit)
@@ -144,7 +154,7 @@ func (app *App) componentUsage(c component.Component) error {
 		flag, takes := "--"+option.Name+"=<answer>", ""
 		switch {
 		case option.Bool:
-			flag, takes = "--"+option.Name, "yes or no; "
+			flag, takes = "--"+option.Name+"[=false]", "yes or no; "
 		case len(option.Choices) > 0:
 			takes = strings.Join(option.Choices, ", ") + "; "
 		}

@@ -15,6 +15,7 @@ import (
 	"strings"
 	"testing"
 
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 
 	"github.com/workflowaiorg/workflow/internal/base"
@@ -41,7 +42,7 @@ func written(t *testing.T, chosen options) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := base.WriteSkeleton(dir, rendered); err != nil {
+	if _, _, err := base.WriteSkeleton(dir, rendered); err != nil {
 		t.Fatal(err)
 	}
 	return dir
@@ -345,5 +346,63 @@ func TestTheAgentsAskForDotEnvToBeIgnored(t *testing.T) {
 		if got != agents {
 			t.Errorf("with llm-agents %v, the edits ask for .env in .gitignore = %v: %q", agents, got, edits)
 		}
+	}
+}
+
+// TestEveryGoServiceFetchesTheGoItsModuleNeeds checks the stack still starts once go.mod asks for a
+// newer Go than the golang image has: the image refuses it unless it may fetch that Go.
+func TestEveryGoServiceFetchesTheGoItsModuleNeeds(t *testing.T) {
+	for _, chosen := range everyChoice {
+		content, err := os.ReadFile(filepath.Join(written(t, chosen), "docker-compose.yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var compose struct {
+			Services map[string]struct {
+				Image       string            `yaml:"image"`
+				Environment map[string]string `yaml:"environment"`
+			} `yaml:"services"`
+		}
+		if err := yaml.Unmarshal(content, &compose); err != nil {
+			t.Fatal(err)
+		}
+		for name, service := range compose.Services {
+			if strings.HasPrefix(service.Image, "golang:") && service.Environment["GOTOOLCHAIN"] != "auto" {
+				t.Errorf("with %+v, %s runs %s without GOTOOLCHAIN: auto", chosen, name, service.Image)
+			}
+		}
+	}
+}
+
+func TestExistingFilesGetWhatTheNewCodeNeeds(t *testing.T) {
+	answers := map[string]any{"module": "example.com/shop", "postgres": true, "queue": false, "llm-agents": false}
+	rendered, err := base.RenderComponentSkeleton(backend.Component, answers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		path string
+		want []string
+	}{
+		{path: "go.mod", want: []string{"github.com/gin-gonic/gin@v", "github.com/uptrace/bun@v", "go get those it lacks"}},
+		{path: "docker-compose.yaml", want: []string{"add the services api, migrate, postgres and the volumes go-build, go-modules, postgres-data to it"}},
+		{path: "pkg/errors/errors.go", want: nil},
+	}
+	for _, test := range tests {
+		t.Run(test.path, func(t *testing.T) {
+			content, ok := rendered[test.path]
+			if !ok {
+				t.Fatalf("the skeleton has no %s", test.path)
+			}
+			hint := backend.Component.Existing(test.path, content)
+			if test.want == nil && hint != "" {
+				t.Errorf("Existing(%s) = %q, want nothing", test.path, hint)
+			}
+			for _, want := range test.want {
+				if !strings.Contains(hint, want) {
+					t.Errorf("Existing(%s) = %q, want it to hold %q", test.path, hint, want)
+				}
+			}
+		})
 	}
 }

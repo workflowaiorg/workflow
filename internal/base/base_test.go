@@ -203,12 +203,15 @@ func TestRenderComponentSkeletonRendersItsTemplates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	written, err := base.WriteSkeleton(dir, rendered)
+	written, existing, err := base.WriteSkeleton(dir, rendered)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"README.md", "go.mod", "main.go"}; !slices.Equal(written, want) {
 		t.Errorf("wrote %v, want %v", written, want)
+	}
+	if want := []string{"kept.go", "kept.txt"}; !slices.Equal(existing, want) {
+		t.Errorf("left alone %v, want %v", existing, want)
 	}
 	for name, want := range map[string]string{
 		"go.mod":    "module example.com/shop\n",
