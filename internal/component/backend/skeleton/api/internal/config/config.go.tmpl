@@ -16,8 +16,10 @@ type Config struct {
 [[- if .postgres ]]
 
 	// PostgresDSN is where the database is, built from POSTGRES_HOST, POSTGRES_PORT,
-	// POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB and POSTGRES_SSLMODE: each defaults to the
-	// local stack's.
+	// POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB and POSTGRES_SSLMODE. The host, port, user and
+	// database default to the local stack's, and sslmode to require. The password has no default,
+	// so a deploy that forgets it never connects with the local one: with no POSTGRES_PASSWORD,
+	// PostgresDSN is empty, and main stops.
 	PostgresDSN string
 [[- end ]]
 [[- if .queue ]]
@@ -31,14 +33,16 @@ type Config struct {
 func Load() *Config {
 	cfg := &Config{Port: getenv("PORT", "8000")}
 [[- if .postgres ]]
-	dsn := url.URL{
-		Scheme:   "postgres",
-		User:     url.UserPassword(getenv("POSTGRES_USER", "app"), getenv("POSTGRES_PASSWORD", "app")),
-		Host:     net.JoinHostPort(getenv("POSTGRES_HOST", "postgres"), getenv("POSTGRES_PORT", "5432")),
-		Path:     "/" + getenv("POSTGRES_DB", "app"),
-		RawQuery: url.Values{"sslmode": {getenv("POSTGRES_SSLMODE", "disable")}}.Encode(),
+	if password := os.Getenv("POSTGRES_PASSWORD"); password != "" {
+		dsn := url.URL{
+			Scheme:   "postgres",
+			User:     url.UserPassword(getenv("POSTGRES_USER", "app"), password),
+			Host:     net.JoinHostPort(getenv("POSTGRES_HOST", "postgres"), getenv("POSTGRES_PORT", "5432")),
+			Path:     "/" + getenv("POSTGRES_DB", "app"),
+			RawQuery: url.Values{"sslmode": {getenv("POSTGRES_SSLMODE", "require")}}.Encode(),
+		}
+		cfg.PostgresDSN = dsn.String()
 	}
-	cfg.PostgresDSN = dsn.String()
 [[- end ]]
 [[- if .queue ]]
 	cfg.RedisAddr = getenv("REDIS_ADDR", "redis:6379")

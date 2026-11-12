@@ -2,21 +2,118 @@ package httputil
 
 import (
 	"cmp"
+	"encoding/json"
+	"maps"
+	"net/url"
+	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 
 	"[[ .module ]]/pkg/errors"
 )
 
-// BindQuery binds the query string into q by its `form` tags. A value that does not parse, or
-// breaks a `binding` rule, is a 400 naming the parameter.
-func BindQuery(c *gin.Context, q any) error {
-	if err := c.ShouldBindQuery(q); err != nil {
-		return BindError(err)
+// Gin's validator names a field by its Go name, which a client never sees; this makes it name the
+// field as the client sends it. It is Gin's one validator, so it is set once, here, where every
+// handler that binds a request already imports.
+func init() {
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		v.RegisterTagNameFunc(wireName)
 	}
-	return nil
+}
+
+// wireName is the name a request gives field: its json, form or uri tag, or its Go name.
+func wireName(field reflect.StructField) string {
+	for _, key := range []string{"json", "form", "uri"} {
+		if name, _, _ := strings.Cut(field.Tag.Get(key), ","); name != "" && name != "-" {
+			return name
+		}
+	}
+	return field.Name
+}
+
+// BindError is the APIError for a request ShouldBind* rejected. Its message names each field by
+// its name in the request and the rule it broke, and never the binder's own text, which names Go
+// types and fields.
+func BindError(err error) *errors.APIError {
+	message := "The request is not valid"
+	var invalid validator.ValidationErrors
+	var wrongType *json.UnmarshalTypeError
+	switch {
+	case errors.As(err, &invalid):
+		problems := make([]string, 0, len(invalid))
+		for _, field := range invalid {
+			problems = append(problems, field.Field()+" "+rule(field))
+		}
+		message += ": " + strings.Join(problems, "; ")
+	case errors.As(err, &wrongType) && wrongType.Field != "":
+		message += ": " + wrongType.Field + " has the wrong type"
+	}
+	return errors.New(errors.CodeInvalidRequest, message, err)
+}
+
+// rule says what field must be, in the client's terms.
+func rule(field validator.FieldError) string {
+	switch field.Tag() {
+	case "required":
+		return "is required"
+	case "oneof":
+		return "must be one of: " + strings.ReplaceAll(field.Param(), " ", ", ")
+	case "min", "gte":
+		return "must be at least " + field.Param() + unit(field)
+	case "max", "lte":
+		return "must be at most " + field.Param() + unit(field)
+	default:
+		return "is not valid"
+	}
+}
+
+// unit is what a min or max counts: a string's characters, a list's items, or nothing for a number.
+func unit(field validator.FieldError) string {
+	plural := "s"
+	if field.Param() == "1" {
+		plural = ""
+	}
+	switch field.Kind() {
+	case reflect.String:
+		return " character" + plural + " long"
+	case reflect.Slice, reflect.Array, reflect.Map:
+		return " item" + plural
+	default:
+		return ""
+	}
+}
+
+// BindQuery binds the query string into q, a pointer to a struct, by its `form` tags. A value that
+// does not parse, or breaks a `binding` rule, is a 400 naming the parameter.
+func BindQuery(c *gin.Context, q any) error {
+	err := c.ShouldBindQuery(q)
+	if err == nil {
+		return nil
+	}
+	var invalid validator.ValidationErrors
+	if !errors.As(err, &invalid) {
+		if name := unparsable(q, c.Request.URL.Query()); name != "" {
+			return errors.New(errors.CodeInvalidRequest, "The request is not valid: "+name+" has the wrong type", err)
+		}
+	}
+	return BindError(err)
+}
+
+// unparsable is the first parameter, by name, whose value does not parse into q's field for it.
+// Gin's error for such a value names no field, so each parameter is bound again on its own.
+func unparsable(q any, query url.Values) string {
+	for _, name := range slices.Sorted(maps.Keys(query)) {
+		probe := reflect.New(reflect.TypeOf(q).Elem()).Interface()
+		if binding.MapFormWithTag(probe, map[string][]string{name: query[name]}, "form") != nil {
+			return name
+		}
+	}
+	return ""
 }
 
 // ParamID reads a positive ID from the path parameter param; what names it in the 400.
