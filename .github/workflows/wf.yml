@@ -52,6 +52,9 @@ jobs:
       backend-go-vet: ${{ steps.changes.outputs.backend-go-vet }}
       backend-go-test: ${{ steps.changes.outputs.backend-go-test }}
       openapi-breaking: ${{ steps.changes.outputs.openapi-breaking }}
+      frontend-web-lint: ${{ steps.changes.outputs.frontend-web-lint }}
+      frontend-web-typecheck: ${{ steps.changes.outputs.frontend-web-typecheck }}
+      frontend-web-build: ${{ steps.changes.outputs.frontend-web-build }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -82,6 +85,9 @@ jobs:
             echo "backend-go-vet=$(changed go.mod '**/*.go' 'go.mod' 'go.sum')"
             echo "backend-go-test=$(changed go.mod '**/*.go' 'go.mod' 'go.sum' '*/openapi.yaml')"
             echo "openapi-breaking=$(changed go.mod '*/openapi.yaml')"
+            echo "frontend-web-lint=$(changed web/package.json 'web/**' 'api/openapi.yaml')"
+            echo "frontend-web-typecheck=$(changed web/package.json 'web/**' 'api/openapi.yaml')"
+            echo "frontend-web-build=$(changed web/package.json 'web/**')"
           } >> "$GITHUB_OUTPUT"
 
   # The backend component: the steps of its gate, with the Go go.mod names.
@@ -157,3 +163,47 @@ jobs:
             fi
           done
           exit $failed
+
+  # The frontend component: the steps of its gate, in web/, with the Node web/package.json's engines
+  # names.
+  frontend-web-lint:
+    needs: changes
+    if: needs.changes.outputs.frontend-web-lint == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: web/package.json
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: cd web && npm run lint
+
+  frontend-web-typecheck:
+    needs: changes
+    if: needs.changes.outputs.frontend-web-typecheck == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: web/package.json
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: cd web && npm run typecheck
+
+  frontend-web-build:
+    needs: changes
+    if: needs.changes.outputs.frontend-web-build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: web/package.json
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci --prefix web
+      - run: cd web && npm run build

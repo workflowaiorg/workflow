@@ -1,0 +1,18 @@
+# The web app's dev server, at http://localhost:5173; docker-compose.yaml includes this file, so
+# docker compose up starts it with the rest. node_modules is a volume of its own: the packages
+# installed for Linux in the container never mix with those installed for the developer's machine.
+services:
+  web:
+    image: node:24-alpine # the major in package.json engines
+    working_dir: /app
+    command: ["sh", "-c", "npm install --no-audit --no-fund && exec npm run dev -- --host"]
+    environment:
+      API_URL: http://api:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./:/app
+      - node-modules:/app/node_modules
+
+volumes:
+  node-modules:

@@ -263,7 +263,7 @@ Run it again at any time: what already passes is left alone.
 
 wf does not start, stop or check the running app. That is the assistant's work, and the skills say
 how: with the backend, the `architecture` skill has the `docker compose` commands and the health
-check.
+check; with the frontend, the `frontend` skill says how to run the app.
 
 ## Check every change in CI
 
@@ -276,6 +276,9 @@ wf comes with CI templates for GitLab and for GitHub Actions. Both run the same 
 | backend go-format | `gofmt -l .; test -z "$(gofmt -l .)"` | the project has `go.mod`, and a `.go` file changed |
 | backend go-vet | `go vet ./...` | the project has `go.mod`, and a `.go` file, `go.mod` or `go.sum` changed |
 | backend go-test | `go test ./...` | the same, or an `openapi.yaml` changed |
+| frontend web-lint | `cd web && npm run lint` | the project has `web/package.json`, and a file in `web/` or `api/openapi.yaml` changed |
+| frontend web-typecheck | `cd web && npm run typecheck` | the same |
+| frontend web-build | `cd web && npm run build` | the project has `web/package.json`, and a file in `web/` changed |
 | openapi breaking | `oasdiff breaking`, each `<service>/openapi.yaml` against the target branch's | in a merge request or pull request, the project has `go.mod`, and an `openapi.yaml` changed |
 
 The breaking-change check fails when a change to a service's HTTP contract would break a client:
@@ -314,10 +317,12 @@ GitLab refuses to run a template whose fingerprint has changed, so nobody can ch
 pipeline by changing the file behind the URL.
 
 The jobs are `wf:sync`, `wf:spec-coverage`, `backend:go-format`, `backend:go-vet`,
-`backend:go-test` and `openapi:breaking`, all in the `test` stage. GitLab reads a merge request's
+`backend:go-test`, `openapi:breaking`, `frontend:web-lint`, `frontend:web-typecheck` and
+`frontend:web-build`, all in the `test` stage. GitLab reads a merge request's
 labels when its pipeline starts: after adding `api-passthrough`, start a new pipeline for the merge
 request. The `backend:` jobs run in `golang:1.25`; with a newer
-`go` line in `go.mod`, Go downloads that version itself.
+`go` line in `go.mod`, Go downloads that version itself. The `frontend:` jobs run in `node:24` and
+install with `npm ci`, which needs the committed `web/package-lock.json`.
 
 To change a job, name it in your own `.gitlab-ci.yml`. What you write there wins:
 
@@ -377,7 +382,9 @@ Keep the `# v0.1.0` comment: Renovate reads it, and moves the commit and the com
 newer release.
 
 The jobs are `wf`, with the two wf checks as steps, `backend-go-format`, `backend-go-vet` and
-`backend-go-test`, which use the Go version `go.mod` names, and `openapi-breaking`. A pull request
+`backend-go-test`, which use the Go version `go.mod` names, `openapi-breaking`, and
+`frontend-web-lint`, `frontend-web-typecheck` and `frontend-web-build`, which use the Node version
+`web/package.json`'s `engines` names and install with `npm ci`. A pull request
 compares against its base, a push against the commit before it; a new branch, or any other event,
 runs every job but `openapi-breaking`, which judges pull requests only. The `pull_request` types
 above make adding or removing `api-passthrough` start a new run. A called workflow's jobs can't be
@@ -409,7 +416,7 @@ a `by hand` line and leaves the change to you. So it does when a file it gives a
 already: it leaves yours alone, and says what yours may lack. Commit what `wf add` wrote, as after
 `wf init`.
 
-`wf add` lists the components your version carries. The frontend comes next.
+`wf add` lists the components your version carries.
 
 ### The backend
 
@@ -548,6 +555,50 @@ curl http://localhost:8001/.well-known/agent-card.json
 ```
 
 No test calls a real model: they answer from a stand-in server, so `go test ./...` costs nothing.
+
+### The frontend
+
+A Vue app in `web/`, typed against the backend's API. It needs the backend: its types come from
+`api/openapi.yaml`.
+
+```sh
+wf add frontend
+# then the two by-hand steps it prints:
+#   add include: [web/compose.yaml] to the top of docker-compose.yaml
+#   in web/: npm install, then npm run api:types; commit package-lock.json and api.gen.d.ts
+docker compose up -d # then open http://localhost:5173
+```
+
+`wf add frontend` writes, once, files that are yours from then on:
+
+| What | Where |
+|---|---|
+| a Vue 3 app in TypeScript, with Vite and the router, and one page that asks the API for its health | `web/` |
+| the one place the app calls the API: a `request` typed against the contract, and a service per domain | `web/src/services/` |
+| the dev server for the local stack, which passes the site's `/api` to the `api` service | `web/compose.yaml` |
+| the checks `npm run lint` runs | `web/scripts/lint.mjs` |
+
+**The API types.** `npm run api:types` writes `web/src/services/api.gen.d.ts` from
+`api/openapi.yaml`. Run it whenever that file changes, and commit both. A service calls
+`request('get', '/health')` with the path as the contract spells it, so a route, a parameter or a
+field that the contract no longer has fails `npm run typecheck`, not a page in production.
+
+`npm run lint` fails when:
+
+- a file outside `web/src/services/` calls the network (`fetch`, a socket) or reads the API types;
+- a file turns text into HTML (`v-html`, `innerHTML` and the like);
+- `api.gen.d.ts` is not what `npm run api:types` writes from `api/openapi.yaml`.
+
+Colours, fonts, a CSS framework, a store and translations are your project's choices: the
+frontend brings none of them.
+
+It also brings:
+
+- the `frontend` skill and a frontend section in `AGENTS.md`, including the deploy order: a page
+  that calls a new endpoint merges only once that endpoint is live in production;
+- three gate steps for `/pre-mr-check` when a file in `web/` changes: `npm run lint`,
+  `npm run typecheck`, which also run when `api/openapi.yaml` changes, and `npm run build`;
+- a `wf doctor` check: Node 24 or newer is installed.
 
 ## Settings: .wf.yml
 
@@ -812,6 +863,10 @@ What wf installs:
 | `… still fails after its fix ran` | The check's `fix:` does not fix it. Run the fix by hand to see why, or correct it in `.wf.yml` |
 | `no .wf.yml in …: run wf in the project's root` | Run wf where `.wf.yml` is |
 | `--module "…" is not a Go module path` | Pass a path such as `github.com/acme/shop`; the message says which part Go rejects |
+| `the frontend's types come from the backend's api/openapi.yaml, and there is none` | Run `wf add backend` first, then `wf add frontend` |
+| `seam: src/… uses fetch` (web lint) | Move the call into a function of `web/src/services/`, and call that |
+| `raw html: src/… uses v-html` (web lint) | Render the text with `{{ }}`. The `frontend` skill says what to do when markdown is truly needed |
+| `api types: src/services/api.gen.d.ts does not match …` (web lint) | Run `npm run api:types` in `web/` and commit the file |
 | `go.mod names the module X, not Y` | Run `wf add backend --module=X`: the files it writes import your packages by that path |
 | `.wf.yml: worktree.copy …`, `worktree.skip …` | Make it a list of globs, such as `[".env*"]`, and check each pattern |
 | `.wf.yml: components.<name> is not a component wf knows` | Run the wf version that added it: `.wf.yml` pins it |

@@ -1,6 +1,7 @@
 package ci_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -10,8 +11,10 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
+	"github.com/workflowaiorg/workflow/internal/base"
 	"github.com/workflowaiorg/workflow/internal/component"
 	"github.com/workflowaiorg/workflow/internal/component/backend"
+	"github.com/workflowaiorg/workflow/internal/component/frontend"
 	"github.com/workflowaiorg/workflow/internal/project"
 )
 
@@ -27,7 +30,7 @@ type componentJob struct {
 var markers = []struct {
 	component component.Component
 	file      string
-}{{backend.Component, "go.mod"}}
+}{{backend.Component, "go.mod"}, {frontend.Component, "web/package.json"}}
 
 // componentJobs returns the job each template must have for each gate step of each component,
 // every option on so that a gate step an option brings is there too, named <component><sep><step>.
@@ -264,5 +267,27 @@ func TestInstallSaysToRunWfLock(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestTheFrontendJobsRunTheNodeTheAppNeeds checks that GitLab's frontend jobs run the Node major the
+// skeleton's web/package.json names; GitHub's read it from the file itself.
+func TestTheFrontendJobsRunTheNodeTheAppNeeds(t *testing.T) {
+	files, err := base.RenderComponentSkeleton(frontend.Component, map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Engines map[string]string `json:"engines"`
+	}
+	if err := json.Unmarshal(files["web/package.json"], &manifest); err != nil {
+		t.Fatal(err)
+	}
+	var jobs map[string]struct {
+		Image any `yaml:"image"`
+	}
+	readYAML(t, "gitlab-ci.yml", &jobs)
+	if want := "node:" + strings.TrimPrefix(manifest.Engines["node"], "^"); jobs[".wf:frontend"].Image != want {
+		t.Errorf(".wf:frontend runs %v, want %s, the major web/package.json's engines names", jobs[".wf:frontend"].Image, want)
 	}
 }
