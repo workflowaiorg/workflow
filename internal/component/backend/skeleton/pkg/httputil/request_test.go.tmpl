@@ -3,6 +3,7 @@ package httputil_test
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -97,10 +98,66 @@ func TestBindQuery(t *testing.T) {
 	require.NoError(t, httputil.BindQuery(request(t, "/", "/?status=paid"), &q))
 	assert.Equal(t, "paid", q.Status)
 
-	assertCode(t, httputil.BindQuery(request(t, "/", "/?status=lost"), &q), errors.CodeInvalidRequest)
+	tests := []struct {
+		target string
+		want   string
+	}{
+		{target: "/?status=lost", want: "The request is not valid: status must be one of: open, paid"},
+		{target: "/?limit=ten&offset=-1", want: "The request is not valid: limit has the wrong type"},
+		{target: "/?offset=-1", want: "The request is not valid: offset must be at least 0"},
+	}
+	for _, test := range tests {
+		t.Run(test.target, func(t *testing.T) {
+			var q struct {
+				Status string `form:"status" binding:"omitempty,oneof=open paid"`
+				httputil.PageQuery
+			}
+			var apiErr *errors.APIError
+			require.ErrorAs(t, httputil.BindQuery(request(t, "/", test.target), &q), &apiErr)
+			assert.Equal(t, errors.CodeInvalidRequest, apiErr.Code)
+			assert.Equal(t, test.want, apiErr.Message)
+			assert.NotContains(t, apiErr.Message, "Status")
+			assert.NotContains(t, apiErr.Message, "Limit")
+		})
+	}
 }
 
 func TestSplitList(t *testing.T) {
 	assert.Equal(t, []string{"a", "b"}, httputil.SplitList(" a, ,b,"))
 	assert.Nil(t, httputil.SplitList(""))
+}
+
+func TestBindErrorNamesFieldsAsTheClientSendsThem(t *testing.T) {
+	type orderRequest struct {
+		CustomerID int64    `json:"customer_id" binding:"required"`
+		Status     string   `json:"status" binding:"omitempty,oneof=open paid"`
+		Note       string   `json:"note" binding:"max=5"`
+		SKUs       []string `json:"skus" binding:"min=1"`
+	}
+	tests := []struct {
+		name string
+		body string
+		want string
+	}{
+		{
+			name: "a broken rule each",
+			body: `{"status":"lost","note":"far too long"}`,
+			want: "The request is not valid: customer_id is required; status must be one of: open, paid; note must be at most 5 characters long; skus must be at least 1 item",
+		},
+		{name: "a value of the wrong type", body: `{"customer_id":"seven"}`, want: "The request is not valid: customer_id has the wrong type"},
+		{name: "a body that is not JSON", body: `{`, want: "The request is not valid"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			c, _ := gin.CreateTestContext(httptest.NewRecorder())
+			c.Request = httptest.NewRequest(http.MethodPost, "/", strings.NewReader(test.body))
+			var req orderRequest
+			err := httputil.BindError(c.ShouldBindJSON(&req))
+			assert.Equal(t, errors.CodeInvalidRequest, err.Code)
+			assert.Equal(t, test.want, err.Message)
+			assert.NotContains(t, err.Message, "orderRequest")
+			assert.NotContains(t, err.Message, "CustomerID")
+		})
+	}
 }

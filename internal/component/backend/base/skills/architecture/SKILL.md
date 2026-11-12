@@ -97,7 +97,7 @@ The local stack is `docker-compose.yaml` at the project's root; run compose ther
 ## Definition of done
 
 - [ ] The layout matches the tree above, with each transport in a directory of its own
-- [ ] `main()` follows the six steps, failing fast on a missing setting
+- [ ] `main()` keeps the order under *main()*, failing fast on a missing setting
 - [ ] Shared state hangs off `App`, not package variables
 - [ ] Shutdown is graceful
 - [ ] Code shared by services is in the root `pkg/`, and only there

@@ -1,16 +1,16 @@
 ---
 name: shared-packages
-description: "The packages every service shares under pkg/ — logging, errors, httputil and middleware — what each gives, and when a new one belongs there."
+description: "The packages every service shares under pkg/ — logging, errors, httputil, openapi and middleware — what each gives, and when a new one belongs there."
 ---
 
 # Skill: Shared packages
 
-The root `pkg/` holds what every service needs, written once. `wf add backend` wrote the first
-four; they are the project's own, to change and extend.
+The root `pkg/` holds what every service needs, written once. `wf add backend` wrote the ones
+below; they are the project's own, to change and extend.
 
 ## When this skill applies
 
-- Using `pkg/logging`, `pkg/errors`, `pkg/httputil` or `pkg/middleware`
+- Using `pkg/logging`, `pkg/errors`, `pkg/httputil`, `pkg/openapi` or `pkg/middleware`
 - Writing code a second service needs, which goes here rather than into a copy
 
 ## `pkg/logging`
@@ -39,8 +39,8 @@ functions.
 |---|---|
 | `Success(c, data)`, `Created(c, data)` | answer 200 or 201 with `{"data": …}` |
 | `RespondWithError(c, err)` | answer `{"error": {"code", "message"}}` with the code's status; logs the cause |
-| `BindError(err)` | the `APIError` for a request `ShouldBind*` rejected |
-| `BindQuery(c, &q)` | binds the query into `q` by its `form` tags; a bad value is a 400 |
+| `BindError(err)` | the `APIError` for a request `ShouldBind*` rejected; its message names each field as the client sends it and the rule it broke, never a Go name |
+| `BindQuery(c, &q)` | binds the query into `q` by its `form` tags; a bad value is a 400 naming the parameter |
 | `ParamID(c, "id", "order")` | a positive ID from a path parameter; anything else is a 400 naming it |
 | `SplitList(raw)` | a comma-separated value as its trimmed, non-empty items |
 | `PageQuery`, `ParsePage(c, max)`, `Page.HasMore(returned, total)` | a paged list's `offset` and `limit`; no limit is a full page, one past `max` is a 400 |

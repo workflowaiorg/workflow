@@ -21,6 +21,12 @@ import (
 func main() {
 	logging.Init()
 	cfg := config.Load()
+[[- if .postgres ]]
+	if cfg.PostgresDSN == "" {
+		logging.Error(context.Background(), "POSTGRES_PASSWORD is not set")
+		os.Exit(1)
+	}
+[[- end ]]
 	application := app.New(cfg)
 	// ctx ends on SIGINT or SIGTERM: the server then drains its requests[[ if .queue ]] and the workers stop[[ end ]].
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

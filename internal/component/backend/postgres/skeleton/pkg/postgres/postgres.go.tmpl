@@ -11,7 +11,6 @@ import (
 	"github.com/uptrace/bun/driver/pgdriver"
 
 	"[[ .module ]]/pkg/errors"
-	"[[ .module ]]/pkg/logging"
 )
 
 // Open returns a pool of connections to the database at dsn. It connects on the first query, not
@@ -25,8 +24,8 @@ func Open(dsn string) *bun.DB {
 var ErrRollback = errors.New(errors.CodeInternal, "rolled back on purpose", nil)
 
 // RunInTx runs fn in a transaction, rolled back when fn fails and committed otherwise. An APIError
-// comes back as it is; any other error, a failed begin or commit among them, is logged and comes
-// back as CodeInternal, so no driver error leaves a repository.
+// comes back as it is; any other error, a failed begin or commit among them, comes back as
+// CodeInternal with it as the cause, so no driver error leaves a repository.
 func RunInTx(ctx context.Context, db *bun.DB, fn func(ctx context.Context, tx bun.Tx) error) error {
 	err := db.RunInTx(ctx, nil, fn)
 	var apiErr *errors.APIError
@@ -36,6 +35,5 @@ func RunInTx(ctx context.Context, db *bun.DB, fn func(ctx context.Context, tx bu
 	case errors.As(err, &apiErr):
 		return err
 	}
-	logging.Error(ctx, "running a transaction", "error", err)
 	return errors.New(errors.CodeInternal, "Could not complete the change", err)
 }

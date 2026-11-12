@@ -4,13 +4,18 @@ import (
 	"bytes"
 	"fmt"
 	"go/format"
+	"go/parser"
+	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"golang.org/x/mod/modfile"
 
 	"github.com/workflowaiorg/workflow/internal/base"
 	"github.com/workflowaiorg/workflow/internal/component/backend"
@@ -41,6 +46,62 @@ func written(t *testing.T, chosen options) string {
 func TestTheSkeletonIsGoInTheProjectsModule(t *testing.T) {
 	for _, chosen := range everyChoice {
 		t.Run(fmt.Sprintf("%+v", chosen), func(t *testing.T) { checkSkeleton(t, written(t, chosen)) })
+	}
+}
+
+func TestEveryImportedModuleIsPinned(t *testing.T) {
+	for _, chosen := range everyChoice {
+		t.Run(fmt.Sprintf("%+v", chosen), func(t *testing.T) {
+			dir := written(t, chosen)
+			goMod, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			file, err := modfile.Parse("go.mod", goMod, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// An import belongs to the longest module path that holds it. Some modules sit inside
+			// another's path, so a missing pin of theirs would otherwise pass as their parent's.
+			modules := []string{
+				"github.com/testcontainers/testcontainers-go/modules/postgres",
+				"github.com/uptrace/bun/dialect/pgdialect",
+				"github.com/uptrace/bun/driver/pgdriver",
+			}
+			for _, r := range file.Require {
+				modules = append(modules, r.Mod.Path)
+			}
+			pinned := func(path string) bool {
+				module := ""
+				for _, m := range modules {
+					if (path == m || strings.HasPrefix(path, m+"/")) && len(m) > len(module) {
+						module = m
+					}
+				}
+				return slices.ContainsFunc(file.Require, func(r *modfile.Require) bool { return r.Mod.Path == module })
+			}
+			err = filepath.WalkDir(dir, func(path string, entry fs.DirEntry, err error) error {
+				if err != nil || !strings.HasSuffix(path, ".go") {
+					return err
+				}
+				parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+				if err != nil {
+					return err
+				}
+				for _, spec := range parsed.Imports {
+					imported, _ := strconv.Unquote(spec.Path.Value)
+					standard := !strings.Contains(strings.Split(imported, "/")[0], ".")
+					if !standard && !strings.HasPrefix(imported, "example.com/shop/") && !pinned(imported) {
+						rel, _ := filepath.Rel(dir, path)
+						t.Errorf("%s imports %s, which go.mod does not pin", rel, imported)
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+		})
 	}
 }
 

@@ -24,7 +24,10 @@ database is still starting. Every repository gets the pool from the `App` and no
 so two repositories on one database share one pool.
 
 `Config.PostgresDSN` is built in `Load()` from `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`,
-`POSTGRES_PASSWORD`, `POSTGRES_DB` and `POSTGRES_SSLMODE`, each defaulting to the local stack's.
+`POSTGRES_PASSWORD`, `POSTGRES_DB` and `POSTGRES_SSLMODE`. The password has no default and sslmode
+defaults to `require`, so a deploy never connects with the local stack's password or without TLS
+by accident; `docker-compose.yaml` gives the service the local values. `require` encrypts without
+checking the server's certificate; a deploy that must check it sets `verify-full`.
 
 ## Repository: `internal/repository/<domain>/postgres/`
 
@@ -44,8 +47,9 @@ func New(db *bun.DB) *Repository {
 The route builds it from the `App`: `orderpg.New(application.DB)`.
 
 - **Not found** (`sql.ErrNoRows`) is `errors.CodeNotFound`, as `error-handling` says.
-- **Any other error** is logged with `logging.Error(ctx, …, "error", err)` and returned as
-  `errors.CodeInternal`. No bun or driver error leaves the repository.
+- **Any other error** is returned as `errors.CodeInternal`, with it as the cause. No bun or driver
+  error leaves the repository, and the repository does not log it: `error-handling` says where it
+  is logged.
 
 `errors` is `pkg/errors`, as everywhere.
 
@@ -57,7 +61,6 @@ func (r *Repository) GetOrder(ctx context.Context, orderID int64) (*model.Order,
     case errors.Is(err, sql.ErrNoRows):
         return nil, errors.New(errors.CodeNotFound, "No such order", err)
     case err != nil:
-        logging.Error(ctx, "getting an order", "error", err, "order_id", orderID)
         return nil, errors.New(errors.CodeInternal, "Could not load the order", err)
     }
     return order, nil
@@ -69,8 +72,8 @@ func (r *Repository) GetOrder(ctx context.Context, orderID int64) (*model.Order,
 Writes that must succeed or fail together run in one transaction, through
 `postgres.RunInTx(ctx, r.db, fn)` from `pkg/postgres`, never bun's own `RunInTx` or `BeginTx`. It
 rolls back when `fn` returns an error and commits otherwise. An `APIError` from `fn` comes back as
-it is; any other error, a failed begin or commit among them, is logged and comes back as
-`CodeInternal`. So `fn` returns bun's errors unwrapped, and wraps only what has a code of its own.
+it is; any other error, a failed begin or commit among them, comes back as `CodeInternal`. So
+`fn` returns bun's errors unwrapped, and wraps only what has a code of its own.
 
 ```go
 err := postgres.RunInTx(ctx, r.db, func(ctx context.Context, tx bun.Tx) error {
@@ -127,7 +130,8 @@ Every schema change is a new SQL file in `migrations/` at the root, shared by ev
 ## A new service with the database
 
 Copied from `api`, it already reads `POSTGRES_*` and opens the pool. In `docker-compose.yaml`, give
-it `depends_on: migrate: condition: service_completed_successfully`, as `api` has.
+it the `environment:` and `depends_on: migrate: condition: service_completed_successfully` that
+`api` has.
 
 ## Testing a repository
 
@@ -173,7 +177,7 @@ func TestOrders(t *testing.T) {
 ## Definition of done
 
 - [ ] Repositories take the `App`'s pool; none opens a connection of its own
-- [ ] `sql.ErrNoRows` is `CodeNotFound`; every other error is a logged `CodeInternal`
+- [ ] `sql.ErrNoRows` is `CodeNotFound`; every other error is `CodeInternal`, not logged here
 - [ ] Writes that belong together run in one `postgres.RunInTx`
 - [ ] Models embed `bun.BaseModel` with a table and alias; nullable columns are pointers
 - [ ] A schema change is a new migration; no applied migration was edited; no data in migrations

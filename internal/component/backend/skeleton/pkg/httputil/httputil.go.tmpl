@@ -43,8 +43,3 @@ func RespondWithError(c *gin.Context, err error) {
 	logging.Error(c.Request.Context(), "request failed", "code", apiErr.Code, "error", apiErr.Cause)
 	c.JSON(errors.HTTPStatus(apiErr.Code), Response{Error: &Error{Code: apiErr.Code, Message: apiErr.Message}})
 }
-
-// BindError is the APIError for a request ShouldBind* rejected.
-func BindError(err error) *errors.APIError {
-	return errors.New(errors.CodeInvalidRequest, "The request is not valid: "+err.Error(), err)
-}

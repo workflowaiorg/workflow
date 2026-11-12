@@ -8,6 +8,12 @@ services:
     command: ["sh", "-c", "go build -o /tmp/api ./api/cmd/http && exec /tmp/api"]
     # Longer than the server's own five seconds to drain, whatever Docker's default is.
     stop_grace_period: 10s
+[[- if .postgres ]]
+    # The local database's: the service has no default for either.
+    environment:
+      POSTGRES_PASSWORD: app
+      POSTGRES_SSLMODE: disable
+[[- end ]]
     ports:
       - "8000:8000"
     volumes:
