@@ -230,7 +230,9 @@ wf scaffold        # a clean clone to a ready repo, in one command
 ```
 
 `wf doctor` runs checks, each a command that passes when it exits 0. They come from the components
-you added and from `doctor:` in `.wf.yml` (see [Settings](#settings-wfyml)). Each gets a line:
+you added and from `doctor:` in `.wf.yml` (see [Settings](#settings-wfyml)). wf runs each check,
+and `wf scaffold` each `fix:`, through `sh -c` as written, so trust a repo's checks as you would its
+Makefile. Each gets a line:
 
 ```
 ✓ docker running
@@ -617,6 +619,9 @@ git diff        # read what changed, then commit it as any other change
    `check    .agents/project/skills/workflow/SKILL.md`. Read the two together with
    `wf show workflow`: your part may now repeat or contradict wf's.
 
+If step 2 cannot start, say the download fails, the pin has still moved and wf says so: run
+`wf update` again to finish.
+
 It commits nothing. Without `--to`, it does steps 2 and 3 for the version already pinned: run that
 after moving `wf:` by hand, or after a bot moved it and ran `wf lock`.
 
@@ -704,7 +709,7 @@ included. `--json` gives the list in a form an agent can read.
 |---|---|
 | 0 | done |
 | 1 | a check failed, or something went wrong |
-| 2 | the command was used wrongly: a typo, a missing flag, a missing setting in `.wf.yml` |
+| 2 | your mistake: a typo, a missing flag, or a file of yours wf cannot use, such as `.wf.yml`, a file under `.agents/project/`, or a `.wf.lock` edited by hand |
 
 wf asks a question only when it runs in a terminal. In a script or CI it fails instead, and names
 the flag to pass.

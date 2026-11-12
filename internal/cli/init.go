@@ -77,7 +77,7 @@ func runInit(app *App, args []string) error {
 		fmt.Fprintln(app.stdout, "wrote    "+path+" (the project's from now on)")
 	}
 	// .wf.yml comes last of what init writes itself, so an init that failed before it can be run again.
-	if err := os.WriteFile(filepath.Join(app.dir, project.ConfigFile), fmt.Appendf(nil, configTemplate, app.version, *forge), 0o644); err != nil {
+	if err := project.WriteAtomically(filepath.Join(app.dir, project.ConfigFile), fmt.Appendf(nil, configTemplate, app.version, *forge)); err != nil {
 		return fmt.Errorf("writing %s: %w", project.ConfigFile, err)
 	}
 	fmt.Fprintln(app.stdout, "wrote    "+project.ConfigFile)

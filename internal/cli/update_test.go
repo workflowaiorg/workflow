@@ -122,6 +122,9 @@ func TestUpdateToMovesThePinAndHandsOver(t *testing.T) {
 	if len(execed) != 2 || execed[1] != "update" {
 		t.Fatalf("wf update --to 0.2.0 = (%d, %q), handed over as %v; want wf 0.2.0 run with update", code, output, execed)
 	}
+	if !strings.Contains(output, ".wf.yml pins wf 0.2.0 now") {
+		t.Errorf("wf update --to 0.2.0 whose handover failed said %q, want it to say the pin moved", output)
+	}
 	if got := read(t, dir, ".wf.yml"); got != "wf: 0.2.0 # the version every checkout runs\nforge: gitlab\n" {
 		t.Errorf(".wf.yml became %q", got)
 	}
@@ -154,5 +157,37 @@ func TestUpdateToMovesThePinAndHandsOver(t *testing.T) {
 	write(t, dir, ".wf.yml", config)
 	if code, output, execed := update("0.1.0", dir, "--to", "0.2.0"); code != 2 || execed != nil || read(t, dir, ".wf.yml") != config || !strings.Contains(output, launcher.NoLaunchEnv) {
 		t.Errorf("wf update --to 0.2.0 with %s=1 = (%d, %q), handed over as %v; want exit 2 and nothing changed", launcher.NoLaunchEnv, code, output, execed)
+	}
+}
+
+func TestUpdateToSaysThePinMovedWhenTheDownloadFails(t *testing.T) {
+	const platform = "linux_amd64"
+	var checksums strings.Builder
+	for _, p := range launcher.Platforms {
+		fmt.Fprintf(&checksums, "%s  %s\n", strings.Repeat("0", 64), launcher.Archive("0.2.0", p))
+	}
+	// The checksums are there, so the pin moves; the archive is not, so nothing can run it.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v0.2.0/checksums.txt" {
+			w.Write([]byte(checksums.String()))
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer server.Close()
+	defer cli.ConfigureLauncher(func(l *launcher.Launcher) {
+		l.ReleasesURL, l.Platform, l.CacheDir, l.NoLaunch = server.URL, platform, filepath.Join(t.TempDir(), "cache"), false
+	})()
+
+	dir := t.TempDir()
+	write(t, dir, ".wf.yml", "wf: 0.1.0\nforge: gitlab\n")
+	var stdout, stderr bytes.Buffer
+	exec := func(string, []string, []string) error { t.Error("handed over with no download"); return nil }
+	code := cli.Main("0.1.0", dir, []string{"update", "--to", "0.2.0"}, nil, strings.NewReader(""), &stdout, &stderr, exec)
+	if code != 1 || !strings.Contains(stderr.String(), ".wf.yml pins wf 0.2.0 now, so run wf update again to finish") {
+		t.Errorf("wf update --to 0.2.0 with no archive = (%d, %q), want exit 1 saying the pin moved", code, stderr.String())
+	}
+	if got := read(t, dir, ".wf.yml"); got != "wf: 0.2.0\nforge: gitlab\n" {
+		t.Errorf(".wf.yml = %q, want the pin moved", got)
 	}
 }

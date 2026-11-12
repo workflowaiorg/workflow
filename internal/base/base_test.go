@@ -184,7 +184,7 @@ func TestFilesAddsEachComponentsPart(t *testing.T) {
 	}
 }
 
-func TestComponentSkeletonRendersItsTemplates(t *testing.T) {
+func TestRenderComponentSkeletonRendersItsTemplates(t *testing.T) {
 	skeleton := component.Component{Name: "sample", Part: component.Part{Skeleton: fstest.MapFS{
 		"go.mod.tmpl":  {Data: []byte("module [[ .module ]]\n")},
 		"main.go.tmpl": {Data: []byte("package main\n\nimport _ \"[[ .module ]]/pkg\"\n")},
@@ -199,7 +199,11 @@ func TestComponentSkeletonRendersItsTemplates(t *testing.T) {
 		}
 	}
 
-	written, err := base.ComponentSkeleton(dir, skeleton, map[string]any{"module": "example.com/shop"})
+	rendered, err := base.RenderComponentSkeleton(skeleton, map[string]any{"module": "example.com/shop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	written, err := base.WriteSkeleton(dir, rendered)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +224,7 @@ func TestComponentSkeletonRendersItsTemplates(t *testing.T) {
 	}
 }
 
-func TestComponentSkeletonRefusesABrokenTemplate(t *testing.T) {
+func TestRenderComponentSkeletonRefusesABrokenTemplate(t *testing.T) {
 	tests := []struct {
 		name     string
 		template string
@@ -232,19 +236,15 @@ func TestComponentSkeletonRefusesABrokenTemplate(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			skeleton := component.Component{Name: "sample", Part: component.Part{Skeleton: fstest.MapFS{"broken.tmpl": {Data: []byte(test.template)}}}}
-			dir := t.TempDir()
-			_, err := base.ComponentSkeleton(dir, skeleton, map[string]any{"module": "example.com/shop"})
+			_, err := base.RenderComponentSkeleton(skeleton, map[string]any{"module": "example.com/shop"})
 			if err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Errorf("ComponentSkeleton = %v, want it to say %q", err, test.want)
-			}
-			if entries, _ := os.ReadDir(dir); len(entries) > 0 {
-				t.Errorf("a broken template still wrote %d files", len(entries))
+				t.Errorf("RenderComponentSkeleton = %v, want it to say %q", err, test.want)
 			}
 		})
 	}
 }
 
-func TestComponentSkeletonRefusesTwoPartsWithTheSameFile(t *testing.T) {
+func TestRenderComponentSkeletonRefusesTwoPartsWithTheSameFile(t *testing.T) {
 	sample := component.Component{
 		Name: "sample",
 		Part: component.Part{Skeleton: fstest.MapFS{"x.txt": {Data: []byte("the component's\n")}}},
@@ -259,13 +259,12 @@ func TestComponentSkeletonRefusesTwoPartsWithTheSameFile(t *testing.T) {
 		{extra: false},
 		{extra: true, want: "two of its parts both have x.txt"},
 	} {
-		dir := t.TempDir()
-		_, err := base.ComponentSkeleton(dir, sample, map[string]any{"extra": test.extra})
+		_, err := base.RenderComponentSkeleton(sample, map[string]any{"extra": test.extra})
 		switch {
 		case test.want == "" && err != nil:
-			t.Errorf("extra=%v: ComponentSkeleton = %v, want no error", test.extra, err)
+			t.Errorf("extra=%v: RenderComponentSkeleton = %v, want no error", test.extra, err)
 		case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
-			t.Errorf("extra=%v: ComponentSkeleton = %v, want it to say %q", test.extra, err, test.want)
+			t.Errorf("extra=%v: RenderComponentSkeleton = %v, want it to say %q", test.extra, err, test.want)
 		}
 	}
 }

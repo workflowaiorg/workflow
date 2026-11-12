@@ -102,11 +102,11 @@ func Skeleton(dir string) ([]string, error) {
 	return writeOnce(dir, files, "files/skeleton")
 }
 
-// ComponentSkeleton writes into dir each file c, added with answers, gives a project that is not
-// there yet, and returns the paths it wrote. Like the project's own skeleton, they are the
-// project's from then on. A file named *.tmpl is a template, rendered with answers and written
-// without its .tmpl: Go source is kept as one, so wf's own build never compiles a project's code.
-func ComponentSkeleton(dir string, c component.Component, answers map[string]any) ([]string, error) {
+// RenderComponentSkeleton returns, by path, the files c, added with answers, gives a project, and
+// writes nothing: WriteSkeleton writes them, and they are the project's from then on. A file named
+// *.tmpl is a template, rendered with answers and written without its .tmpl: Go
+// source is kept as one, so wf's own build never compiles a project's code.
+func RenderComponentSkeleton(c component.Component, answers map[string]any) (map[string][]byte, error) {
 	skeleton := map[string][]byte{}
 	for _, part := range c.With(answers).Parts() {
 		if part.Skeleton == nil {
@@ -132,7 +132,7 @@ func ComponentSkeleton(dir string, c component.Component, answers map[string]any
 		delete(skeleton, name)
 		skeleton[target] = out.Bytes()
 	}
-	return writeFiles(dir, skeleton)
+	return skeleton, nil
 }
 
 func writeOnce(dir string, fsys fs.FS, root string) ([]string, error) {
@@ -140,12 +140,12 @@ func writeOnce(dir string, fsys fs.FS, root string) ([]string, error) {
 	if err := read(fsys, root, skeleton); err != nil {
 		return nil, err
 	}
-	return writeFiles(dir, skeleton)
+	return WriteSkeleton(dir, skeleton)
 }
 
-// writeFiles writes each of skeleton's files into dir that is not there yet, and returns the paths
-// it wrote.
-func writeFiles(dir string, skeleton map[string][]byte) ([]string, error) {
+// WriteSkeleton writes each of skeleton's files into dir that is not there yet, and returns the
+// paths it wrote.
+func WriteSkeleton(dir string, skeleton map[string][]byte) ([]string, error) {
 	var written []string
 	for _, name := range slices.Sorted(maps.Keys(skeleton)) {
 		full := filepath.Join(dir, filepath.FromSlash(name))

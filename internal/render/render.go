@@ -115,7 +115,7 @@ func load(dir string, config project.Config, components []component.Component) (
 			where := part + "/" + rel
 			k, name, ok := classify(rel)
 			if !ok {
-				return fmt.Errorf("%s: wf does not know this file; see the layout in wf's README", where)
+				return mistakeIn(part, fmt.Errorf("%s: wf does not know this file; see the layout in wf's README", where))
 			}
 			// A template is copied whole into each new spec or record, so a project part added under
 			// it would land in every one of them.
@@ -131,7 +131,7 @@ func load(dir string, config project.Config, components []component.Component) (
 			}
 			doc, err := parseDocument(where, content)
 			if err != nil {
-				return err
+				return mistakeIn(part, err)
 			}
 			src := find(k, name)
 			if part == project.BaseDir {
@@ -146,6 +146,15 @@ func load(dir string, config project.Config, components []component.Component) (
 		}
 	}
 	return sources, nil
+}
+
+// mistakeIn returns err as the developer's mistake when part is the project's, and as it is when
+// part is wf's base.
+func mistakeIn(part string, err error) error {
+	if part == project.ProjectDir {
+		return project.AsUserError(err)
+	}
+	return err
 }
 
 // workflowFiles are the files under workflow/ in .agents/base and .agents/project, each of which

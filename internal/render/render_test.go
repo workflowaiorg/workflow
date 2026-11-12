@@ -2,6 +2,7 @@ package render_test
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"io/fs"
 	"os"
@@ -181,8 +182,9 @@ func TestSyncRefusesALockListingAFileItNeverGenerates(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, project.LockFile), []byte(lock), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := syncProject(dir, false); err == nil || !strings.Contains(err.Error(), "is not a file wf generates") {
-				t.Errorf("Sync = %v, want the lock entry refused", err)
+			_, err := syncProject(dir, false)
+			if mistake := (*project.UserError)(nil); !errors.As(err, &mistake) || !strings.Contains(err.Error(), "is not a file wf generates") {
+				t.Errorf("Sync = %v, want the lock entry refused as a UserError", err)
 			}
 			if _, err := os.Stat(filepath.Join(dir, project.ConfigFile)); err != nil {
 				t.Errorf("Sync removed %s: %v", project.ConfigFile, err)
@@ -248,8 +250,8 @@ func TestSyncRefusesToWriteThroughASymlink(t *testing.T) {
 			}
 
 			_, err := syncProject(dir, true)
-			if err == nil || !strings.Contains(err.Error(), link+" is a symbolic link") {
-				t.Errorf("Sync = %v, want an error naming %s", err, link)
+			if mistake := (*project.UserError)(nil); !errors.As(err, &mistake) || !strings.Contains(err.Error(), link+" is a symbolic link") {
+				t.Errorf("Sync = %v, want a UserError naming %s", err, link)
 			}
 			after := tree(t, filepath.Join(dir, project.ProjectDir))
 			if len(after) != len(before) {
@@ -490,6 +492,9 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 		path    string
 		content string
 		want    string
+		// mistake says the developer made it, so wf exits 2: everything in the project's part, and
+		// a key the base needs from .wf.yml.
+		mistake bool
 	}{
 		{
 			name:    "a file wf does not know",
@@ -502,6 +507,7 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 			path:    ".agents/project/skills/bare/SKILL.md",
 			content: "---\nname: bare\n---\nNo description.\n",
 			want:    `needs "description"`,
+			mistake: true,
 		},
 		{
 			name:    "a subagent with a key besides its description",
@@ -514,30 +520,56 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 			path:    ".agents/base/workflow/GUIDE.md",
 			content: "[[ .missing ]]\n",
 			want:    "missing",
+			mistake: true,
 		},
 		{
 			name:    "a skill with an empty description",
 			path:    ".agents/project/skills/naming/SKILL.md",
 			content: "---\ndescription: \"\"\n---\nRules.\n",
 			want:    "description is empty",
+			mistake: true,
 		},
 		{
 			name:    "a frontmatter key written twice",
 			path:    ".agents/project/skills/naming/SKILL.md",
 			content: "---\ndescription: one\ndescription: two\n---\nRules.\n",
 			want:    `"description" twice`,
+			mistake: true,
 		},
 		{
 			name:    "a skill named apart from its folder",
 			path:    ".agents/project/skills/naming/SKILL.md",
 			content: "---\nname: renamed\n---\nRules.\n",
 			want:    `its folder is "naming"`,
+			mistake: true,
 		},
 		{
 			name:    "a project part for a template",
 			path:    ".agents/project/workflow/SPEC-TEMPLATE.md",
 			content: "Pinned elsewhere: the manifest.\n",
 			want:    "a template takes no project part",
+			mistake: true,
+		},
+		{
+			name:    "a file wf does not know in the project's part",
+			path:    ".agents/project/skills/hello/notes.txt",
+			content: "stray",
+			want:    ".agents/project/skills/hello/notes.txt",
+			mistake: true,
+		},
+		{
+			name:    "a project subagent with a key besides its description",
+			path:    ".agents/project/subagents/auditor.md",
+			content: "---\ndescription: Audits.\nmodel: fast\n---\nAudit.\n",
+			want:    `not "model"`,
+			mistake: true,
+		},
+		{
+			name:    "frontmatter never closed in the project's part",
+			path:    ".agents/project/commands/review.md",
+			content: "---\ndescription: Reviews.\n",
+			want:    "never closed",
+			mistake: true,
 		},
 		{
 			name:    "frontmatter never closed",
@@ -556,8 +588,12 @@ func TestSyncRefusesABrokenSource(t *testing.T) {
 			if err := os.WriteFile(full, []byte(test.content), 0o644); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := syncProject(dir, false); err == nil || !strings.Contains(err.Error(), test.want) {
+			_, err := syncProject(dir, false)
+			if err == nil || !strings.Contains(err.Error(), test.want) {
 				t.Errorf("Sync = %v, want an error containing %q", err, test.want)
+			}
+			if mistake := (*project.UserError)(nil); errors.As(err, &mistake) != test.mistake {
+				t.Errorf("Sync = %v, want it a UserError: %v", err, test.mistake)
 			}
 		})
 	}

@@ -233,41 +233,25 @@ func readLock(dir string) (lock, error) {
 	}
 	var read lock
 	if err := yaml.Unmarshal(content, &read); err != nil {
-		return lock{}, fmt.Errorf("reading %s: %w", project.LockFile, err)
+		return lock{}, project.UserErrorf("reading %s: %v; restore it from git and run wf sync", project.LockFile, err)
 	}
 	// wf removes the files the lock lists, so a path wf could not have generated is refused rather
 	// than trusted.
 	for path := range read.Files {
 		if !generatable(path) {
-			return lock{}, fmt.Errorf("reading %s: %q is not a file wf generates", project.LockFile, path)
+			return lock{}, project.UserErrorf("reading %s: %q is not a file wf generates; restore it from git and run wf sync", project.LockFile, path)
 		}
 	}
 	return read, nil
 }
 
-// writeFile writes data to path under dir through a temporary file renamed into place, so a crash
-// leaves the old file or the new one, never half of one.
+// writeFile writes data to path under dir, its directories included.
 func writeFile(dir, path string, data []byte) error {
 	full := filepath.Join(dir, filepath.FromSlash(path))
 	if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
-	temp, err := os.CreateTemp(filepath.Dir(full), ".wf-*")
-	if err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	defer os.Remove(temp.Name())
-	if _, err := temp.Write(data); err != nil {
-		temp.Close()
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	if err := temp.Close(); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	if err := os.Chmod(temp.Name(), 0o644); err != nil {
-		return fmt.Errorf("writing %s: %w", path, err)
-	}
-	if err := os.Rename(temp.Name(), full); err != nil {
+	if err := project.WriteAtomically(full, data); err != nil {
 		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return nil
@@ -289,7 +273,7 @@ func noSymlinks(dir, path string) error {
 		}
 		if info.Mode()&fs.ModeSymlink != 0 {
 			rel, _ := filepath.Rel(dir, current)
-			return fmt.Errorf("%s is a symbolic link; wf writes no generated file through one, so replace it with a plain directory or file", filepath.ToSlash(rel))
+			return project.UserErrorf("%s is a symbolic link; wf writes no generated file through one, so replace it with a plain directory or file", filepath.ToSlash(rel))
 		}
 	}
 	return nil

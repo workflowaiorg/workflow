@@ -90,14 +90,14 @@ func (app *App) movePin(version string) (handedOver bool, err error) {
 	if err != nil {
 		return false, err
 	}
-	if err := os.WriteFile(file, after, 0o644); err != nil {
+	if err := project.WriteAtomically(file, after); err != nil {
 		return false, fmt.Errorf("writing %s: %w", project.ConfigFile, err)
 	}
 
 	result, err := l.Lock()
 	if err != nil {
 		// A pin with no fingerprints stops every later wf command, so it is put back.
-		if restoreErr := os.WriteFile(file, before, 0o644); restoreErr != nil {
+		if restoreErr := project.WriteAtomically(file, before); restoreErr != nil {
 			return false, errors.Join(err, fmt.Errorf("putting %s back: %w", project.ConfigFile, restoreErr))
 		}
 		return false, fmt.Errorf("pinning wf %s: %w; %s was left as it was", version, err, project.ConfigFile)
@@ -107,15 +107,20 @@ func (app *App) movePin(version string) (handedOver bool, err error) {
 		fmt.Fprintf(app.stdout, "wrote    %s (wf %s's fingerprints)\n", project.SumFile, version)
 	}
 
+	// From here on the pin has moved, so a failure says so: the next wf command runs version.
+	moved := fmt.Sprintf("%s pins wf %s now, so run wf update again to finish", project.ConfigFile, version)
 	target, err := l.Resolve([]string{"update"})
-	if err != nil || target.Binary == "" {
-		return false, err
+	if err != nil {
+		return false, fmt.Errorf("%w; %s", err, moved)
+	}
+	if target.Binary == "" {
+		return false, nil
 	}
 	if app.exec == nil {
-		return false, errors.New("this wf cannot hand over to another version")
+		return false, fmt.Errorf("this wf cannot hand over to another version; %s", moved)
 	}
 	err = app.exec(target.Binary, []string{target.Binary, "update"}, launcher.Environ(app.environ, target))
-	return true, fmt.Errorf("running wf %s from %s: %w; if it keeps failing, delete that folder", target.Version, target.Binary, err)
+	return true, fmt.Errorf("running wf %s from %s: %w; if it keeps failing, delete that folder; %s", target.Version, target.Binary, err, moved)
 }
 
 // launcher returns the launcher of the wf running, in its project.
