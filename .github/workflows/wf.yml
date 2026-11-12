@@ -27,6 +27,7 @@ jobs:
             *) echo "wf has no release for $(uname -m)"; exit 1 ;;
           esac
           archive="wf_${version}_linux_${arch}.tar.gz"
+          [ -f .wf.sum ] || { echo "there is no .wf.sum: run wf lock and commit .wf.sum"; exit 1; }
           sum=$(awk -v archive="$archive" '$1 == archive { sub(/^sha256:/, "", $2); print $2 }' .wf.sum)
           if [ -z "$sum" ]; then echo ".wf.sum has no $archive: run wf lock and commit .wf.sum"; exit 1; fi
           curl -fsSLo "$RUNNER_TEMP/$archive" "https://github.com/workflowaiorg/workflow/releases/download/v$version/$archive"
