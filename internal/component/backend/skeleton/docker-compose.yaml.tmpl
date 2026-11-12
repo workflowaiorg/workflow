@@ -8,9 +8,11 @@ services:
     command: ["sh", "-c", "go build -o /tmp/api ./api/cmd/http && exec /tmp/api"]
     # Longer than the server's own five seconds to drain, whatever Docker's default is.
     stop_grace_period: 10s
-[[- if .postgres ]]
-    # The local database's: the service has no default for either.
     environment:
+      # The golang images never fetch the newer Go a go.mod may ask for; this lets them.
+      GOTOOLCHAIN: auto
+[[- if .postgres ]]
+      # The local database's: the service has no default for either.
       POSTGRES_PASSWORD: app
       POSTGRES_SSLMODE: disable
 [[- end ]]
@@ -53,6 +55,7 @@ services:
     image: golang:1.25-alpine
     working_dir: /app
     environment:
+      GOTOOLCHAIN: auto
       GOOSE_DRIVER: postgres
       GOOSE_DBSTRING: postgres://app:app@postgres:5432/app?sslmode=disable
       GOOSE_MIGRATION_DIR: migrations
@@ -95,6 +98,7 @@ services:
     command: ["sh", "-c", "go build -o /tmp/summary ./agents/summary/cmd/a2a && exec /tmp/summary"]
     stop_grace_period: 10s
     environment:
+      GOTOOLCHAIN: auto
       AGENT_URL: http://summary:8000
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}

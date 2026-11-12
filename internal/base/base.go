@@ -140,26 +140,27 @@ func writeOnce(dir string, fsys fs.FS, root string) ([]string, error) {
 	if err := read(fsys, root, skeleton); err != nil {
 		return nil, err
 	}
-	return WriteSkeleton(dir, skeleton)
+	written, _, err := WriteSkeleton(dir, skeleton)
+	return written, err
 }
 
-// WriteSkeleton writes each of skeleton's files into dir that is not there yet, and returns the
-// paths it wrote.
-func WriteSkeleton(dir string, skeleton map[string][]byte) ([]string, error) {
-	var written []string
+// WriteSkeleton writes each of skeleton's files into dir that is not there yet. It returns the paths
+// it wrote, and those it left alone because a file was there already.
+func WriteSkeleton(dir string, skeleton map[string][]byte) (written, existing []string, err error) {
 	for _, name := range slices.Sorted(maps.Keys(skeleton)) {
 		full := filepath.Join(dir, filepath.FromSlash(name))
 		if _, err := os.Lstat(full); err == nil {
+			existing = append(existing, name)
 			continue
 		} else if !errors.Is(err, fs.ErrNotExist) {
-			return written, fmt.Errorf("checking %s: %w", name, err)
+			return written, existing, fmt.Errorf("checking %s: %w", name, err)
 		}
 		if err := write(full, skeleton[name]); err != nil {
-			return written, fmt.Errorf("writing %s: %w", name, err)
+			return written, existing, fmt.Errorf("writing %s: %w", name, err)
 		}
 		written = append(written, name)
 	}
-	return written, nil
+	return written, existing, nil
 }
 
 // Check compares dir's .agents/base with the base this version of wf carries for the project's

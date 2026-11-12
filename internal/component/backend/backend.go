@@ -7,9 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 
+	"go.yaml.in/yaml/v3"
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
 
@@ -47,7 +51,7 @@ var Component = component.Component{
 		Base:     sub("base"),
 		Skeleton: sub("skeleton"),
 		Gate: []project.GateStep{
-			{Name: "go format", Paths: []string{"**/*.go"}, Run: `test -z "$(gofmt -l .)"`},
+			{Name: "go format", Paths: []string{"**/*.go"}, Run: `gofmt -l .; test -z "$(gofmt -l .)"`},
 			{Name: "go vet", Paths: []string{"**/*.go", "go.mod", "go.sum"}, Run: "go vet ./..."},
 			// openapi.yaml too: go test is what fails on a file edited by hand.
 			{Name: "go test", Paths: []string{"**/*.go", "go.mod", "go.sum", "*/openapi.yaml"}, Run: "go test ./..."},
@@ -65,6 +69,7 @@ var Component = component.Component{
 		}
 		return edits
 	},
+	Existing: existing,
 }
 
 // checkModule checks, with Go's own rules, that the module answer is a module path and, in a project
@@ -90,6 +95,35 @@ func checkModule(dir string, answers map[string]any) error {
 		return project.UserErrorf("go.mod names the module %s, not %s; run wf add backend --module=%s", existing, answer, existing)
 	}
 	return nil
+}
+
+// existing says what a project's own go.mod or docker-compose.yaml lacks of what wf would have
+// written: without the versions the new code was written for, go mod tidy takes the newest, which
+// may need a newer Go or write openapi.yaml differently; without the services, nothing runs.
+func existing(path string, content []byte) string {
+	switch path {
+	case "go.mod":
+		file, err := modfile.ParseLax(path, content, nil)
+		if err != nil {
+			return ""
+		}
+		var modules []string
+		for _, require := range file.Require {
+			modules = append(modules, require.Mod.Path+"@"+require.Mod.Version)
+		}
+		return "the new code was written for " + strings.Join(modules, " ") + "; go get those it lacks, then go mod tidy"
+	case "docker-compose.yaml":
+		var compose struct {
+			Services map[string]any `yaml:"services"`
+			Volumes  map[string]any `yaml:"volumes"`
+		}
+		if err := yaml.Unmarshal(content, &compose); err != nil {
+			return ""
+		}
+		return "add the services " + strings.Join(slices.Sorted(maps.Keys(compose.Services)), ", ") +
+			" and the volumes " + strings.Join(slices.Sorted(maps.Keys(compose.Volumes)), ", ") + " to it"
+	}
+	return ""
 }
 
 func sub(dir string) fs.FS {

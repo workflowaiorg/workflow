@@ -94,7 +94,7 @@ backend:go-format:
     - exists: [go.mod]
       changes: ["**/*.go"]
   script:
-    - test -z "$(gofmt -l .)"
+    - gofmt -l .; test -z "$(gofmt -l .)"
 
 backend:go-vet:
   extends: .wf:backend

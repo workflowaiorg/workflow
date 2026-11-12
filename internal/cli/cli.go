@@ -141,14 +141,14 @@ func (app *App) parseFlags(flags *flag.FlagSet, args []string) error {
 // ask returns the answer to question, or fallback when it is left empty. With no terminal to ask
 // on, it fails naming the flag that gives the answer instead, rather than wait for an answer
 // nobody will type: an agent has no terminal, so it asks the developer and passes the flag.
-func (app *App) ask(question, fallback, flagName string) (string, error) {
+func (app *App) ask(question, fallback, flags string) (string, error) {
 	if !app.interactive {
-		return "", fmt.Errorf("%w: no terminal to ask %q on; pass --%s", errUsage, question, flagName)
+		return "", fmt.Errorf("%w: no terminal to ask %q on; pass %s", errUsage, question, flags)
 	}
 	fmt.Fprintf(app.stdout, "%s [%s]: ", question, fallback)
 	answer, err := app.stdin.ReadString('\n')
 	if errors.Is(err, io.EOF) && answer == "" {
-		return "", fmt.Errorf("%w: no answer to %q; pass --%s", errUsage, question, flagName)
+		return "", fmt.Errorf("%w: no answer to %q; pass %s", errUsage, question, flags)
 	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		return "", fmt.Errorf("reading the answer to %q: %w", question, err)

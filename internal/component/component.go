@@ -43,6 +43,9 @@ type Component struct {
 	// Edits says what the developer should change by hand in files the project owns. wf never
 	// edits them itself.
 	Edits func(answers map[string]any) []string
+	// Existing, when set, says what to bring by hand into a file the project had already at path,
+	// given content, what wf would have written there; "" when it has nothing particular to say.
+	Existing func(path string, content []byte) string
 }
 
 // Option is one question wf add asks, and the flag that answers it instead.
