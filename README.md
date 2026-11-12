@@ -343,10 +343,11 @@ workflow:
     - if: $CI_COMMIT_TAG
 ```
 
-They apply to your own jobs too. A job with no `rules:`, or one whose rules test
-`$CI_COMMIT_BRANCH`, never runs in a merge request pipeline, so once a merge request is open it
-would stop running for its branch. Give such a job a rule that matches there, such as
-`rules: [{when: on_success}]`, first.
+They apply to your own jobs too. A job whose rules test `$CI_COMMIT_BRANCH` never runs in a merge
+request pipeline, so once a merge request is open it would stop running for its branch. Before adding
+these rules, give such a job a rule that matches there, as the first item of its `rules:`:
+`- if: $CI_PIPELINE_SOURCE == "merge_request_event"`.
+A job with no `rules:` runs in both.
 
 ### On GitHub
 
@@ -791,7 +792,7 @@ What wf installs:
 | `<file>: missing`, `no longer generated`, `.wf.lock: out of date` | Run `wf sync` and commit what it writes |
 | `.agents/base/…: differs from wf vX's base` | Restore the file (`git checkout -- .agents/base`). Put your change in `.agents/project/` |
 | `pins wf vX, but this is wf vY` | You ran with `WF_NO_LAUNCH=1`, or a wf older than the launcher. Run without `WF_NO_LAUNCH`, or install a newer wf |
-| `.wf.sum holds no fingerprint of …` | Run `wf lock` and commit `.wf.sum` |
+| `.wf.sum holds no fingerprint of …`; in CI, `there is no .wf.sum` or `.wf.sum has no …` | Run `wf lock` and commit `.wf.sum` |
 | `refusing wf X: the download of … is …, but .wf.sum records …` | The download is not what your team recorded. Nothing ran. Don't work around it: tell whoever looks after wf in your project |
 | `refusing: the release now gives … the fingerprint …` | The release changed after `.wf.sum` recorded it. `.wf.sum` was left alone. Same as above |
 | `.wf.sum: line N is not …`, `… is listed twice` | Restore `.wf.sum` from git, then run `wf lock` |

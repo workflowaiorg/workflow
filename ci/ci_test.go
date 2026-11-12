@@ -3,6 +3,7 @@ package ci_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -207,5 +208,61 @@ func TestBothTemplatesCheckBreakingChanges(t *testing.T) {
 	}
 	if !strings.Contains(githubScript, image) {
 		t.Errorf("GitHub's openapi-breaking does not run %s, as GitLab's does", image)
+	}
+}
+
+// TestInstallSaysToRunWfLock runs each template's install script in a project with no .wf.sum, and
+// in one whose .wf.sum lacks the release, and checks that it stops before downloading anything and
+// says to run wf lock.
+func TestInstallSaysToRunWfLock(t *testing.T) {
+	var gitlab map[string]struct {
+		BeforeScript []string `yaml:"before_script"`
+	}
+	readYAML(t, "gitlab-ci.yml", &gitlab)
+	var github struct {
+		Jobs map[string]struct {
+			Steps []struct {
+				ID  string `yaml:"id"`
+				Run string `yaml:"run"`
+			} `yaml:"steps"`
+		} `yaml:"jobs"`
+	}
+	readYAML(t, "../.github/workflows/wf.yml", &github)
+	scripts := map[string]string{"GitLab": strings.Join(gitlab[".wf:install"].BeforeScript, "\n")}
+	for _, step := range github.Jobs["wf"].Steps {
+		if step.ID == "install" {
+			scripts["GitHub"] = step.Run
+		}
+	}
+	for forge, script := range scripts {
+		if script == "" {
+			t.Fatalf("%s's template has no install script", forge)
+		}
+	}
+	if len(scripts) != 2 {
+		t.Fatal("the GitHub workflow's wf job has no step with the id install")
+	}
+
+	for forge, script := range scripts {
+		for name, sum := range map[string]string{"no .wf.sum": "", "no fingerprint": "wf_0.0.1_linux_amd64.tar.gz sha256:00\n"} {
+			t.Run(forge+"/"+name, func(t *testing.T) {
+				dir := t.TempDir()
+				if err := os.WriteFile(dir+"/.wf.yml", []byte("wf: 0.1.0\n"), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				if sum != "" {
+					if err := os.WriteFile(dir+"/.wf.sum", []byte(sum), 0o644); err != nil {
+						t.Fatal(err)
+					}
+				}
+				// GitHub runs a step with bash -e; GitLab's script sets -e itself.
+				cmd := exec.Command("sh", "-e", "-c", script)
+				cmd.Dir = dir
+				out, err := cmd.CombinedOutput()
+				if err == nil || !strings.Contains(string(out), "run wf lock and commit .wf.sum") || strings.Contains(string(out), "awk") {
+					t.Errorf("it ended with %v and said\n%s\nwant a failure that says to run wf lock", err, out)
+				}
+			})
+		}
 	}
 }
