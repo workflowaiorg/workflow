@@ -112,3 +112,33 @@ backend:go-test:
       changes: ["**/*.go", go.mod, go.sum, "*/openapi.yaml"]
   script:
     - go test ./...
+
+# The frontend component: the steps of its gate, in web/.
+.wf:frontend:
+  image: node:24 # the major in web/package.json's engines
+  before_script:
+    - npm ci --prefix web
+
+frontend:web-lint:
+  extends: .wf:frontend
+  rules:
+    - exists: [web/package.json]
+      changes: ["web/**", api/openapi.yaml]
+  script:
+    - cd web && npm run lint
+
+frontend:web-typecheck:
+  extends: .wf:frontend
+  rules:
+    - exists: [web/package.json]
+      changes: ["web/**", api/openapi.yaml]
+  script:
+    - cd web && npm run typecheck
+
+frontend:web-build:
+  extends: .wf:frontend
+  rules:
+    - exists: [web/package.json]
+      changes: ["web/**"]
+  script:
+    - cd web && npm run build
