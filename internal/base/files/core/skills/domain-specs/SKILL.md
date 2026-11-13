@@ -160,10 +160,11 @@ domain's decisions in one thread and where the wall of text costs the reviewer m
 **Never write the file ahead of that answer, and never decide on your own that a record is
 accepted.**
 
-**3. The record lands in its own MR** — one file, plus its row in `.workflow/decisions/README.md`.
-It carries `Closes #<adr-issue>`. The exception is a backfill: those records constrain code that
-already exists, so there is nothing for them to land ahead of, and they ride with the domain's spec
-in that Issue's MR.
+**3. The record lands in its own MR** — one new file, plus its row in
+`.workflow/decisions/README.md`. A record that supersedes another also deletes the old one, by
+[Superseding](#superseding). It carries `Closes #<adr-issue>`. The exception is a backfill: those
+records constrain code that already exists, so there is nothing for them to land ahead of, and they
+ride with the domain's spec in that Issue's MR.
 
 The spec still cites a record whose code is not built yet — `wf spec-coverage` fails on a record
 no spec links to. At the claim it will change, add one line: **Decided, not yet built**, what will
@@ -191,13 +192,13 @@ status: accepted
 domain: orders
 spec: .workflow/specs/orders/SPEC.md
 supersedes: —
-superseded_by: —
 issue: 42
 ---
 ```
 
-`status` is `accepted` or `superseded`. `domain` is `none` for a process-level decision, and `spec`
-is `none` when no spec cites it. `supersedes` is the `NNNN` of the record this one replaces, or `—`.
+`status` is always `accepted`: a replaced record is deleted. `domain` is `none` for a
+process-level decision, and `spec` is `none` when no spec cites it. `supersedes` is the `NNNN` of
+the record this one replaces, or `—`.
 
 **There is no `proposed` status.** The Issue is the proposed state; a rejected decision leaves a
 closed Issue and no file, which is a better record of a road not taken than a deleted one.
@@ -209,28 +210,37 @@ review. Two branches can both grab `0031`; renumber at merge, it takes half a mi
 
 ### Superseding
 
-A record is **never edited**, except as the two paragraphs after this one allow. A decision that
-changes gets a new record and a new ADR Issue — changing your mind is itself a decision. The new
-record says `supersedes:` the old number from the moment it is written. The one edit allowed to a
-record in force is marking it replaced — `status: superseded` and `superseded_by:` the new number —
-and at that moment the spec's `→ [ADR-NNNN]` must move to the new number. The two records name each
-other, and so do the index rows: the old row's `Superseded by` and the new row's `Supersedes`. A
-record with no `supersedes:` line means `—`.
+A record is **never edited**, except as the paragraphs below allow. A decision that changes, wholly
+or in part, gets a new record and a new ADR Issue — changing your mind is itself a decision. There
+is no "amends": a reader learns the current decision from one file, never by merging a chain of
+them.
+
+- **Part of it changes.** The new record's *Decision* is the whole decision as it now stands — the
+  parts that hold, carried over as written, plus the new part. The old version of the changed part
+  is one bullet in *Alternatives considered*, saying why it was dropped.
+- **Part of it no longer holds.** The same, with *Decision* holding only what survives and
+  *Alternatives* saying why the rest does not.
+
+The new record says `supersedes:` the old number from the moment it is written, and **the MR that
+lands it deletes the old record** with its index row, and moves every spec's `→ [ADR-NNNN]` to the
+new number. Git is the history: it goes wherever the repository goes and needs no network, and
+`git log -p -- '.workflow/decisions/NNNN-*'` finds the old text by the number `supersedes:` gives.
+That *Alternatives* bullet is the one place a reader meets the old decision without git, so it is
+never left out. A record with no `supersedes:` line means `—`.
 
 **A record no merged code relies on yet** may be amended in the MR that first builds it, with the
 reason in the MR description and a comment on the record's `[ADR]` Issue — before anything is built
 on it, a second record would only describe a road nobody took.
 
-**A record whose feature is removed from the code** may be deleted, together with its index row and
-every spec line that cites it, with the reason stated in the commit and the MR. Git history keeps
-it. The records it supersedes, or that supersede it, describe the same removed feature and go with
-it; a record that stays keeps no `supersedes:` or `superseded_by:` naming a deleted one, and its
-index row says `—` there instead.
+**A record whose feature is removed from the code** is deleted the same way, together with its
+index row and every spec line that cites it, with the reason stated in the commit and the MR.
+
+**Numbers are never reused**: a new record takes the number one above the highest ever used, in
+the index or in git history. A gap in the index is a record replaced or removed.
 
 The new record lands before the code that builds it, so for a while the spec describes behaviour
-whose record is already superseded. The claim keeps describing today, and carries the **Decided,
-not yet built** line linking the new record; the old record is one click further, through its
-`supersedes:`.
+whose record is already gone. The claim keeps describing today, and carries the **Decided, not yet
+built** line linking the new record; the old text is in git, by the number its `supersedes:` gives.
 
 ---
 
@@ -278,14 +288,14 @@ That has to stay cheap, or the step gets skipped on the small tasks that are mos
 `.workflow/specs/`, `.workflow/decisions/` or `.workflow/plans/` changes — as the project's CI
 should. It fails when:
 
-- a spec's `[ADR-NNNN]` link points at no record, at a different record, or at a **superseded**
-  one — the behaviour changed and the spec did not follow — or an `ADR-NNNN` appears without a link;
-- an accepted record is not cited by the spec its own `spec:` names, unless that is `none`;
+- a spec's `[ADR-NNNN]` link points at no record or at a different record — when the missing one
+  was **superseded**, the behaviour changed and the spec did not follow, and the problem names the
+  record that replaced it — or an `ADR-NNNN` appears without a link;
+- a record is not cited by the spec its own `spec:` names, unless that is `none`;
 - a record's frontmatter is incomplete, its `id` is not its file's number or is taken twice, its
-  status is not `accepted` or `superseded`, a supersession points at nothing later, or a record's
-  `supersedes:` and the old record's `superseded_by:` do not name each other;
-- a record has no row in the index, a row disagrees with its record, or `Supersedes` and
-  `Superseded by` do not name each other;
+  status is not `accepted`, it still carries `superseded_by:`, its `supersedes:` is not an earlier
+  number, or the record it supersedes is still in the directory;
+- a record has no row in the index, or a row disagrees with its record;
 - a directory in `.workflow/plans/` is not named `<DD-MM-YYYY>-<slug>`.
 
 A plan in flight for more than 30 days is printed as debt, never failed on: counted, and meant to

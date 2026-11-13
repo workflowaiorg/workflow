@@ -6,19 +6,22 @@ status: accepted
 domain: <the domain it belongs to, or none>
 spec: <.workflow/specs/<domain>/SPEC.md, or none>
 supersedes: <the NNNN of the record this one replaces, or —>
-superseded_by: —
 issue: <the number of the ADR Issue this was accepted in>
 ---
 
 <!--
-Copy this file to .workflow/decisions/NNNN-<slug>.md, take the next free NNNN, and add its row
-to .workflow/decisions/README.md in the same commit.
+Copy this file to .workflow/decisions/NNNN-<slug>.md, take the NNNN one above the highest
+ever used (in the index or in git history: numbers are never reused), and add its row to
+.workflow/decisions/README.md in the same commit.
 
 Do not write this file until the ADR Issue has been accepted in its thread. The Issue is the
 proposed state — see the domain-specs skill, "How a record is accepted". There is no `proposed`
 status here, and `accepted` is not yours to assign on your own judgement.
 
-How a record may change afterwards is in the domain-specs skill, *Superseding*. Delete these comments
+Records are never edited afterwards. A decision that changes, wholly or in part, gets a new record
+and a new Issue: its Decision is the whole decision as it now stands, its Alternatives say why the
+old version was dropped, and `supersedes:` names the old number. The same MR deletes the old record
+and its index row; git keeps it. See the domain-specs skill, *Superseding*. Delete these comments
 and the generated line above them.
 -->
 

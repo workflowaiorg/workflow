@@ -773,14 +773,26 @@ by hand. See [Get a machine ready](#get-a-machine-ready).
 Checks that the project's specs and decision records agree:
 
 - every `[ADR-NNNN]` link in a spec points at a record that is still in force;
-- every accepted record is cited by its spec and listed in `.workflow/decisions/README.md`, and its
-  index row says what the record says;
+- every record is cited by its spec and listed in `.workflow/decisions/README.md`, and its index
+  row says what the record says;
+- a record that supersedes another has deleted it. A replaced record is not kept with a
+  `superseded` status: `accepted` is the only status.
 - every plan folder is named `<DD-MM-YYYY>-<slug>`.
 
 It also counts plans that have been open more than 30 days as debt. Debt is reported, never failed
 on.
 
 `--report-only` prints the same report and exits 0. Use it while you are cleaning up.
+
+When a decision changes, wholly or in part, write a new record that states the whole decision as
+it now stands and names the old one in `supersedes:`. The same change deletes the old record and
+its index row, and moves the spec's citation to the new number. The old text stays in git:
+
+```sh
+git log -p -- '.workflow/decisions/0007-*'
+```
+
+The `domain-specs` skill, *Superseding*, has the rule.
 
 ### `wf version`, `wf help [--json]`
 
@@ -875,6 +887,9 @@ What wf installs:
 | `… is installed already` | Change its answers under `components:` in `.wf.yml`, then run `wf sync` |
 | `wf add can only add to components: written out in full` | `components:` comes from a YAML alias (`*name`) or a merge key (`<<:`). Write the components out under `components:` itself, then run `wf add` again |
 | `… uses <key>, which .wf.yml does not set` | Add the key it names to `.wf.yml` |
+| `` `superseded_by:` is gone `` (spec-coverage) | Delete the line from each record. A record replaced by another is deleted, not marked |
+| `not a row this check can read` (spec-coverage) | Drop the `Superseded by` column from `.workflow/decisions/README.md`: a row is ID, title, domain, status, issue, supersedes |
+| `supersedes NNNN, but … is still here` (spec-coverage) | Delete the old record and its index row, and move any spec citing it to the new number. Git keeps the old text |
 | `has more than one branch` (worktree) | Delete the branch you don't want, or work in the one you do |
 
 ## Licence
