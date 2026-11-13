@@ -1,23 +1,31 @@
 # Decision records
 
 Why the system is the way it is, and what we turned down. One file per decision. A record is never
-edited after it merges — a decision that changes gets a new record that supersedes the old one.
+edited after it merges — a decision that changes, wholly or in part, gets a new record that
+supersedes the old one, and the old one is deleted.
 
 Most decisions never earn a record. The test for the ones that do, and how a record is accepted,
 are in the `domain-specs` skill, *When a decision earns a record*. The short version: a record is
 agreed in an `[ADR]` Issue **before** the code that relies on it.
 
 To add one: copy [`../DECISION-TEMPLATE.md`](../DECISION-TEMPLATE.md) to `NNNN-<slug>.md`, take the
-next free number, and add its row below in the same commit. `wf spec-coverage` checks that every
+number one above the highest ever used, in the index or in git history (numbers are never
+reused), and add its row below in the same commit. `wf spec-coverage` checks that every
 record has its row and that each row says what its record says.
 
 ## The index
 
-One row per record, newest last. A superseded record keeps its row and its file forever;
-`Supersedes` and `Superseded by` point at each other.
+One row per record, newest last. A record that was superseded, or whose feature was removed from
+the code, is deleted with its row, and numbers are never reused, so a gap is a record replaced or
+removed. `Supersedes` names the number it replaced; git keeps the old text:
 
-| ID | Title | Domain | Status | Issue | Supersedes | Superseded by |
-|---|---|---|---|---|---|---|
+```sh
+git log -p -- '.workflow/decisions/NNNN-*'   # the text of record NNNN
+git log --format= --name-only -- .workflow/decisions/ | sed -n 's|.*/\([0-9]\{4\}\)-.*|\1|p' | sort -u | tail -1   # the highest number ever used
+```
+
+| ID | Title | Domain | Status | Issue | Supersedes |
+|---|---|---|---|---|---|
 
 ## Why every record sits in this one directory
 

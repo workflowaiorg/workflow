@@ -106,8 +106,8 @@ project's CI runs them too.
 |---|---|---|
 | A generated file is never edited by hand | `wf sync --check` | an edit to a copy that the next `wf sync` would silently overwrite |
 | `.agents/base` is the base of the pinned wf version | `wf sync --check` | an edit to wf's part, which belongs in `.agents/project` |
-| A spec cites only records still in force | `wf spec-coverage` | a record superseded while the spec describing the old behaviour goes on citing it |
-| Every accepted record is cited and indexed | `wf spec-coverage` | reasoning no reader of the spec will ever reach, and an index that disagrees with its files |
+| A spec cites only records still in force | `wf spec-coverage` | a record superseded and deleted while the spec describing the old behaviour goes on citing it, and an old record left behind |
+| Every record is cited and indexed | `wf spec-coverage` | reasoning no reader of the spec will ever reach, and an index that disagrees with its files |
 | A plan is named by the day it started | `wf spec-coverage` | a plan nobody can date, and files loose in `.workflow/plans/` |
 
 ### What is not enforced, stated plainly so nobody assumes otherwise

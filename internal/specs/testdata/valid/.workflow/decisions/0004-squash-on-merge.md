@@ -6,7 +6,6 @@ status: accepted
 domain: none
 spec: none
 supersedes: —
-superseded_by: —
 issue: 15
 ---
 

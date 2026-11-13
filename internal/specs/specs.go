@@ -63,14 +63,19 @@ func LoadSpecs(root string) ([]Spec, error) {
 }
 
 // checkCitations is the check the rest exists for: every record a spec cites is
-// there, is the record the link text names, and has not been superseded. A spec
-// citing a superseded record describes behaviour that has since changed.
+// there and is the record the link text names. A superseded record is deleted, so a spec still
+// citing it describes behaviour that has since changed; the problem then names the record that
+// replaced it.
 func checkCitations(root string, specs []Spec, records []Record) []string {
 	var problems []string
 
 	byPath := map[string]Record{}
+	replacedBy := map[string]string{} // superseded id → the id that replaced it
 	for _, record := range records {
 		byPath[record.path] = record
+		if record.Supersedes != none {
+			replacedBy[record.Supersedes] = record.ID
+		}
 	}
 
 	for _, spec := range specs {
@@ -87,7 +92,13 @@ func checkCitations(root string, specs []Spec, records []Record) []string {
 			resolved := filepath.ToSlash(filepath.Clean(filepath.Join(filepath.Dir(spec.path), target)))
 
 			record, ok := byPath[resolved]
+			newer, superseded := replacedBy[citation.ID]
 			switch {
+			case !ok && superseded:
+				problems = append(problems, fmt.Sprintf(
+					"%s: ADR-%s was superseded by ADR-%s — the behaviour changed, so the spec follows it and cites %s",
+					at, citation.ID, newer, newer,
+				))
 			case !ok:
 				problems = append(problems, fmt.Sprintf(
 					"%s: [ADR-%s] links to %s, which is not a record", at, citation.ID, resolved,
@@ -96,11 +107,6 @@ func checkCitations(root string, specs []Spec, records []Record) []string {
 				problems = append(problems, fmt.Sprintf(
 					"%s: [ADR-%s] links to %s, which is ADR-%s", at, citation.ID, resolved, record.ID,
 				))
-			case record.Status == "superseded":
-				problems = append(problems, fmt.Sprintf(
-					"%s: ADR-%s is superseded by ADR-%s — the behaviour changed, so the spec follows it and cites %s",
-					at, citation.ID, record.SupersededBy, record.SupersededBy,
-				))
 			}
 		}
 	}
@@ -108,7 +114,7 @@ func checkCitations(root string, specs []Spec, records []Record) []string {
 	return problems
 }
 
-// checkCited checks the other direction: every accepted record is cited by the
+// checkCited checks the other direction: every record is cited by the
 // spec its own `spec:` names. A record no spec cites is reasoning nobody reaching
 // the behaviour will find. Process-level decisions say `spec: none` and are exempt.
 func checkCited(specs []Spec, records []Record) []string {
@@ -123,7 +129,7 @@ func checkCited(specs []Spec, records []Record) []string {
 	}
 
 	for _, record := range records {
-		if record.Status != "accepted" || record.Spec == "none" || record.Spec == "" {
+		if record.Spec == "none" || record.Spec == "" {
 			continue
 		}
 		citations, ok := cited[record.Spec]

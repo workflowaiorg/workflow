@@ -8,22 +8,20 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 )
 
 // Record is the frontmatter of one .workflow/decisions/NNNN-<slug>.md.
 type Record struct {
-	ID           string
-	Title        string
-	Date         string
-	Status       string
-	Domain       string
-	Spec         string
-	Supersedes   string
-	SupersededBy string
-	Issue        string
+	ID         string
+	Title      string
+	Date       string
+	Status     string
+	Domain     string
+	Spec       string
+	Supersedes string
+	Issue      string
 
 	path  string // relative to the repository root
 	lines map[string]int
@@ -39,17 +37,17 @@ var (
 	recordID   = regexp.MustCompile(`^\d{4}$`)
 	dateField  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-	requiredKeys = []string{"id", "title", "date", "status", "domain", "spec", "superseded_by", "issue"}
+	requiredKeys = []string{"id", "title", "date", "status", "domain", "spec", "issue"}
 )
 
-// none is how a record's frontmatter says a field is empty: `superseded_by: —`. `supersedes:` is
+// none is how a record's frontmatter says a field is empty: `supersedes: —`. `supersedes:` is also
 // the one key a record may leave out, meaning the same: records written before it existed have
 // none, and a record is never edited to add one.
 const none = "—"
 
 // LoadRecords reads every record's frontmatter and checks each on its own: every
-// key present, the id matching the file name and unique, a status we know, and a
-// supersession that points somewhere real. Problems that need the specs or the
+// key present, the id matching the file name and unique, the one status, and a
+// supersession whose old record is gone. Problems that need the specs or the
 // index are checked elsewhere.
 func LoadRecords(root string) ([]Record, []string, error) {
 	entries, err := os.ReadDir(filepath.Join(root, decisionDir))
@@ -101,7 +99,7 @@ func LoadRecords(root string) ([]Record, []string, error) {
 	for _, record := range records {
 		if first, ok := byID[record.ID]; ok {
 			problems = append(problems, fmt.Sprintf(
-				"%s: id %s is taken by %s too — renumber the later one to the next free number",
+				"%s: id %s is taken by %s too — renumber the later one to one above the highest number ever used",
 				record.path, record.ID, first.path,
 			))
 			continue
@@ -183,7 +181,6 @@ func parseRecord(root, path string) (Record, []string, error) {
 	if record.Supersedes == "" {
 		record.Supersedes = none
 	}
-	record.SupersededBy = fields["superseded_by"]
 	record.Issue = fields["issue"]
 
 	return record, problems, nil
@@ -231,54 +228,29 @@ func checkRecord(root string, record Record, byID map[string]Record) []string {
 				"%s: supersedes names the record this one replaced, as NNNN, or is `—`",
 				record.where("supersedes"),
 			))
-		case !ok:
+		case record.Supersedes >= record.ID:
 			problems = append(problems, fmt.Sprintf(
-				"%s: supersedes %s — there is no record %s",
-				record.where("supersedes"), record.Supersedes, record.Supersedes,
+				"%s: supersedes %s — a record supersedes an earlier one, never a later one",
+				record.where("supersedes"), record.Supersedes,
 			))
-		case older.SupersededBy != record.ID:
+		case ok:
 			problems = append(problems, fmt.Sprintf(
-				"%s: supersedes %s, but %s does not say `superseded_by: %s`",
-				record.where("supersedes"), record.Supersedes, older.path, record.ID,
+				"%s: supersedes %s, but %s is still here — the MR that lands a record deletes the one it supersedes, with its index row",
+				record.where("supersedes"), record.Supersedes, older.path,
 			))
 		}
 	}
 
-	switch record.Status {
-	case "":
-	case "accepted":
-		if record.SupersededBy != "" && record.SupersededBy != none {
-			problems = append(problems, fmt.Sprintf(
-				"%s: superseded_by is %s but the status is accepted — a superseded record says `status: superseded`",
-				record.where("superseded_by"), record.SupersededBy,
-			))
-		}
-	case "superseded":
-		switch newer, ok := byID[record.SupersededBy]; {
-		case !recordID.MatchString(record.SupersededBy):
-			problems = append(problems, fmt.Sprintf(
-				"%s: status is superseded, so superseded_by names the record that replaced it, as NNNN",
-				record.where("superseded_by"),
-			))
-		case !ok:
-			problems = append(problems, fmt.Sprintf(
-				"%s: superseded_by %s — there is no record %s",
-				record.where("superseded_by"), record.SupersededBy, record.SupersededBy,
-			))
-		case newer.ID <= record.ID:
-			problems = append(problems, fmt.Sprintf(
-				"%s: superseded_by %s — a record is superseded by a later one, never an earlier one",
-				record.where("superseded_by"), record.SupersededBy,
-			))
-		case newer.Supersedes != record.ID:
-			problems = append(problems, fmt.Sprintf(
-				"%s: superseded_by %s, but %s does not say `supersedes: %s`",
-				record.where("superseded_by"), record.SupersededBy, newer.path, record.ID,
-			))
-		}
-	default:
+	if _, ok := record.lines["superseded_by"]; ok {
 		problems = append(problems, fmt.Sprintf(
-			"%s: status %q — a record is `accepted` or `superseded`; there is no proposed status, the ADR Issue is the proposal",
+			"%s: `superseded_by:` is gone — a superseded record is deleted, and the new one says `supersedes:`",
+			record.where("superseded_by"),
+		))
+	}
+
+	if record.Status != "" && record.Status != "accepted" {
+		problems = append(problems, fmt.Sprintf(
+			"%s: status %q — a record is `accepted`; there is no proposed status, the ADR Issue is the proposal, and a superseded record is deleted",
 			record.where("status"), record.Status,
 		))
 	}
@@ -288,14 +260,13 @@ func checkRecord(root string, record Record, byID map[string]Record) []string {
 
 // Row is one row of the table in .workflow/decisions/README.md.
 type Row struct {
-	ID           string
-	Link         string
-	Title        string
-	Domain       string
-	Status       string
-	Issue        string
-	Supersedes   []string
-	SupersededBy []string
+	ID         string
+	Link       string
+	Title      string
+	Domain     string
+	Status     string
+	Issue      string
+	Supersedes []string
 
 	line int
 }
@@ -332,10 +303,9 @@ func LoadIndex(root string) ([]Row, error) {
 		if match := rowLink.FindStringSubmatch(cells[0]); match != nil {
 			row.ID, row.Link = match[1], match[2]
 		}
-		if len(cells) == 7 {
+		if len(cells) == 6 {
 			row.Title, row.Domain, row.Status, row.Issue = cells[1], cells[2], cells[3], cells[4]
 			row.Supersedes = anyID.FindAllString(cells[5], -1)
-			row.SupersededBy = anyID.FindAllString(cells[6], -1)
 		}
 		rows = append(rows, row)
 	}
@@ -343,10 +313,8 @@ func LoadIndex(root string) ([]Row, error) {
 	return rows, nil
 }
 
-// checkIndex checks that every record has exactly one row, that the row says what
-// the file says, and that the index's Supersedes and Superseded by columns point
-// at each other. The records name each other too — `supersedes:` on the new one,
-// `superseded_by:` on the old — and each row must say what its file says.
+// checkIndex checks that every record has exactly one row and that the row says what
+// the file says.
 func checkIndex(records []Record, rows []Row) []string {
 	var problems []string
 	at := func(row Row) string { return fmt.Sprintf("%s:%d", indexPath, row.line) }
@@ -360,7 +328,7 @@ func checkIndex(records []Record, rows []Row) []string {
 	for _, row := range rows {
 		if row.ID == "" || row.Status == "" {
 			problems = append(problems, fmt.Sprintf(
-				"%s: not a row this check can read — | [NNNN](NNNN-slug.md) | title | domain | status | #issue | supersedes | superseded by |",
+				"%s: not a row this check can read — | [NNNN](NNNN-slug.md) | title | domain | status | #issue | supersedes |",
 				at(row),
 			))
 			continue
@@ -390,25 +358,6 @@ func checkIndex(records []Record, rows []Row) []string {
 		}
 	}
 
-	for _, row := range indexed {
-		for _, older := range row.Supersedes {
-			if other, ok := indexed[older]; !ok || !slices.Contains(other.SupersededBy, row.ID) {
-				problems = append(problems, fmt.Sprintf(
-					"%s: %s supersedes %s, but %s's row does not say it is superseded by %s",
-					at(row), row.ID, older, older, row.ID,
-				))
-			}
-		}
-		for _, newer := range row.SupersededBy {
-			if other, ok := indexed[newer]; !ok || !slices.Contains(other.Supersedes, row.ID) {
-				problems = append(problems, fmt.Sprintf(
-					"%s: %s is superseded by %s, but %s's row does not say it supersedes %s",
-					at(row), row.ID, newer, newer, row.ID,
-				))
-			}
-		}
-	}
-
 	return problems
 }
 
@@ -434,18 +383,6 @@ func checkRow(at string, row Row, record Record) []string {
 	}
 	if row.Issue != "#"+record.Issue {
 		differs("issue", row.Issue, "#"+record.Issue)
-	}
-
-	supersededBy := ""
-	if len(row.SupersededBy) > 0 {
-		supersededBy = strings.Join(row.SupersededBy, ", ")
-	}
-	fileSupersededBy := record.SupersededBy
-	if fileSupersededBy == none {
-		fileSupersededBy = ""
-	}
-	if supersededBy != fileSupersededBy {
-		differs("superseded by", supersededBy, fileSupersededBy)
 	}
 
 	supersedes := strings.Join(row.Supersedes, ", ")

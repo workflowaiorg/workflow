@@ -2,9 +2,9 @@
 // index agree with each other.
 //
 // A spec is edited in place and a record is never edited, so the two drift in one direction: a
-// decision changes, a new record supersedes the old one, and the spec that described the old
-// behaviour goes on citing it. A spec citing a superseded record is the highest-value failure
-// here — it means behaviour changed and the spec did not follow.
+// decision changes, a new record supersedes and deletes the old one, and the spec that described
+// the old behaviour goes on citing it. A spec citing a superseded record is the highest-value
+// failure here — it means behaviour changed and the spec did not follow.
 //
 // Every check is structural. None of them reads a spec's prose against the code: "a failed order
 // is refunded in full" is not greppable, and keeping a spec true is a person's job, done in the MR
@@ -71,8 +71,6 @@ func (report Report) Write(w io.Writer) {
 	counts := map[string]int{}
 	for _, record := range report.Records {
 		switch {
-		case record.Status == "superseded":
-			counts["superseded"]++
 		case record.Spec == "none":
 			counts["none"]++
 		default:
@@ -90,7 +88,6 @@ func (report Report) Write(w io.Writer) {
 	fmt.Fprintf(w, "%d specs, %d records, %d plans in flight\n", len(report.Specs), len(report.Records), len(report.Plans))
 	fmt.Fprintf(w, "  cited       %d  accepted, cited by the spec it names\n", counts["cited"])
 	fmt.Fprintf(w, "  spec: none  %d  accepted, process-level, cited by no spec\n", counts["none"])
-	fmt.Fprintf(w, "  superseded  %d  kept for their reasoning, cited by no spec\n", counts["superseded"])
 	fmt.Fprintf(w, "  plan debt   %d  in flight for more than %d days\n", len(debt), int(planDebtAfter.Hours()/24))
 	for _, plan := range debt {
 		fmt.Fprintf(w, "    %s/%s  %d days — settle it into %s/archive/, or finish it\n",
@@ -98,7 +95,7 @@ func (report Report) Write(w io.Writer) {
 	}
 
 	if len(report.Problems) == 0 {
-		fmt.Fprintln(w, "\nEvery citation resolves to an accepted record, and every record is cited and indexed.")
+		fmt.Fprintln(w, "\nEvery citation resolves to a record, and every record is cited and indexed.")
 		return
 	}
 	noun := "problems"

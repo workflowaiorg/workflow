@@ -6,7 +6,6 @@ status: accepted
 domain: orders
 spec: .workflow/specs/orders/SPEC.md
 supersedes: 0001
-superseded_by: —
 issue: 12
 ---
 
